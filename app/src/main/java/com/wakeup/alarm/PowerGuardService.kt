@@ -3,6 +3,7 @@ package com.wakeup.alarm
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Handler
@@ -15,15 +16,30 @@ import android.view.accessibility.AccessibilityEvent
 
 /**
  * Power guard: while the alarm rings, anything that opens on top of the alarm screen
- * (for example the power-off menu) is covered instantly and closed automatically.
- * The person does not have to press anything: the phone lands back on the alarm screen.
+ * (for example the power-off menu) is covered instantly and then closed again and again
+ * (Back press every 0.25 s, alarm screen re-opened every 1 s) for up to 5 seconds.
+ * The cover is removed only when this guard period is over.
  */
 class PowerGuardService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var cover: View? = null
-    private var lastGuardAt = 0L
-    private val removeCover = Runnable { removeCoverNow() }
+    private var guarding = false
+    private var guardUntil = 0L
+    private var tickCount = 0
+
+    private val tick = object : Runnable {
+        override fun run() {
+            if (!AlarmService.isRinging || SystemClock.elapsedRealtime() >= guardUntil) {
+                stopGuard()
+                return
+            }
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            tickCount++
+            if (tickCount % 4 == 2) bringAlarmBack()
+            handler.postDelayed(this, 250)
+        }
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
@@ -31,27 +47,37 @@ class PowerGuardService : AccessibilityService() {
         if (!AlarmService.isRinging) return
 
         val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName) return // our own alarm screen is fine
+        if (pkg == packageName) return // our own alarm screen / cover is fine
 
         // Remember what Samsung opened, so we can check the detection later.
         val cls = event.className?.toString() ?: ""
         getSharedPreferences("power_guard", Context.MODE_PRIVATE)
             .edit().putString("guard_last", "$pkg / $cls").apply()
 
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastGuardAt < 1500) return
-        lastGuardAt = now
-
-        // 1) cover the screen so nothing underneath can be tapped
+        // Cover the screen and (re)start the repeated closing for 5 seconds.
         showCover()
-        // 2) close the foreign window automatically (twice, to be sure)
-        performGlobalAction(GLOBAL_ACTION_BACK)
-        handler.postDelayed({
-            if (AlarmService.isRinging) performGlobalAction(GLOBAL_ACTION_BACK)
-        }, 300)
-        // 3) remove the cover again: the alarm screen is visible again
-        handler.removeCallbacks(removeCover)
-        handler.postDelayed(removeCover, 1200)
+        guardUntil = SystemClock.elapsedRealtime() + 5000
+        if (!guarding) {
+            guarding = true
+            tickCount = 0
+            handler.post(tick)
+        }
+    }
+
+    private fun bringAlarmBack() {
+        try {
+            startActivity(
+                Intent(this, AlarmActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun stopGuard() {
+        guarding = false
+        handler.removeCallbacks(tick)
+        removeCoverNow()
     }
 
     private fun showCover() {
@@ -84,7 +110,7 @@ class PowerGuardService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        removeCoverNow()
+        stopGuard()
     }
 
     override fun onDestroy() {
