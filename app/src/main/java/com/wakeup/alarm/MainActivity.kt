@@ -2,6 +2,7 @@ package com.wakeup.alarm
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -109,6 +110,9 @@ class MainActivity : Activity() {
         root.addView(makeButton("Open security settings (turn on Pin windows)") {
             startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
         })
+        root.addView(makeButton("Turn on Power guard (blocks the power-off menu)") {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        })
 
         status = TextView(this).apply {
             textSize = 16f
@@ -193,8 +197,17 @@ class MainActivity : Activity() {
         } else {
             "NOT allowed (alarm screen cannot come back after Home)"
         }
+        val guard = if (PowerGuardService.isEnabled(this)) {
+            "ON"
+        } else {
+            "OFF (power-off menu NOT blocked)"
+        }
+        val last = getSharedPreferences("power_guard", Context.MODE_PRIVATE)
+            .getString("guard_last", "none yet")
         status.text = line1 + "\nSaved task: " + taskName +
-            "\nDisplay over other apps: " + overlay
+            "\nDisplay over other apps: " + overlay +
+            "\nPower guard: " + guard +
+            "\nLast other window seen while ringing: " + last
     }
 
     companion object {
