@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
@@ -42,7 +43,7 @@ class AlarmActivity : Activity() {
             gravity = Gravity.CENTER
         })
         root.addView(TextView(this).apply {
-            text = "Part 1 test screen.\nThe QR-scan task is added in Part 3."
+            text = "Part 2 test screen.\nVolume keys and Back are locked.\nThe QR-scan task is added in Part 3."
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -56,5 +57,27 @@ class AlarmActivity : Activity() {
             }
         })
         setContentView(root)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // If the alarm is already stopped (stale screen), close this screen.
+        if (!AlarmService.isRinging) finish()
+    }
+
+    /** Swallow the volume keys completely while this screen is showing. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP,
+            KeyEvent.KEYCODE_VOLUME_DOWN,
+            KeyEvent.KEYCODE_VOLUME_MUTE -> return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    /** Back button does nothing while the alarm is ringing. */
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        // intentionally empty
     }
 }

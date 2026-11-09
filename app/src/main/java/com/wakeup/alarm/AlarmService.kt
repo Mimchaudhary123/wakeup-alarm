@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.database.ContentObserver
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
@@ -17,24 +18,35 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.provider.Settings
 
 class AlarmService : Service() {
 
     private var player: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var observerRegistered = false
 
-    // Keeps the alarm volume at maximum while ringing (watchdog).
+    // Backup watchdog: re-checks the alarm volume 5 times per second.
     private val volumeWatchdog = object : Runnable {
         override fun run() {
             forceMaxVolume()
-            handler.postDelayed(this, 500)
+            handler.postDelayed(this, 200)
+        }
+    }
+
+    // Instant reaction: fires the moment ANY system volume setting changes.
+    private val volumeObserver = object : ContentObserver(handler) {
+        override fun onChange(selfChange: Boolean) {
+            forceMaxVolume()
         }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        isRinging = true
+
         val alarmIntent = Intent(this, AlarmActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(
@@ -70,7 +82,13 @@ class AlarmService : Service() {
             wakeLock?.acquire(15 * 60 * 1000L)
         }
 
+        forceMaxVolume()
         startSound()
+
+        if (!observerRegistered) {
+            contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, volumeObserver)
+            observerRegistered = true
+        }
         handler.removeCallbacks(volumeWatchdog)
         handler.post(volumeWatchdog)
 
@@ -97,6 +115,7 @@ class AlarmService : Service() {
                 )
                 setDataSource(this@AlarmService, uri)
                 isLooping = true
+                setVolume(1.0f, 1.0f)
                 prepare()
                 start()
             }
@@ -105,16 +124,27 @@ class AlarmService : Service() {
     }
 
     private fun forceMaxVolume() {
-        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.setStreamVolume(
-            AudioManager.STREAM_ALARM,
-            am.getStreamMaxVolume(AudioManager.STREAM_ALARM),
-            0
-        )
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (am.isStreamMute(AudioManager.STREAM_ALARM)) {
+                am.adjustStreamVolume(AudioManager.STREAM_ALARM, AudioManager.ADJUST_UNMUTE, 0)
+            }
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            // Only write when it actually differs, so we never trigger our own observer in a loop.
+            if (am.getStreamVolume(AudioManager.STREAM_ALARM) != max) {
+                am.setStreamVolume(AudioManager.STREAM_ALARM, max, 0)
+            }
+        } catch (e: Exception) {
+        }
     }
 
     override fun onDestroy() {
+        isRinging = false
         handler.removeCallbacks(volumeWatchdog)
+        if (observerRegistered) {
+            contentResolver.unregisterContentObserver(volumeObserver)
+            observerRegistered = false
+        }
         try {
             player?.stop()
         } catch (e: Exception) {
@@ -129,5 +159,9 @@ class AlarmService : Service() {
     companion object {
         private const val CHANNEL_ID = "wakeup_alarm"
         private const val NOTIF_ID = 1001
+
+        /** True while an alarm is ringing. The alarm screen uses this to close itself if stale. */
+        @Volatile
+        var isRinging: Boolean = false
     }
 }
