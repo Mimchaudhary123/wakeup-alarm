@@ -39,3 +39,8 @@ android {
         jvmTarget = "17"
     }
 }
+
+dependencies {
+    // QR scanner view with camera + flashlight support
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+}
