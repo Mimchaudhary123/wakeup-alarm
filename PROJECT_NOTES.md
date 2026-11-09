@@ -14,6 +14,7 @@ adb is at C:\platform-tools (Samsung USB driver installed, `adb devices` works).
 - Flashlight (torch) ON while scanning (power cuts).
 - Volume keys locked while ringing + watchdog forcing alarm volume to max.
 - Home/Back/Recents/notification shade/power menu/safe boot blocked via Device Owner kiosk (lock task) mode. Fallback for phones without Device Owner: screen pinning.
+- (Device Owner is NOT possible: the user's phone has many important accounts that cannot be removed, and adb set-device-owner needs no accounts. Part 4 uses screen pinning + overlay-permission relaunch instead.)
 - Block force-stop/uninstall, time changes, factory reset via Device Owner policies.
 - Reboot: save state, relaunch alarm after boot.
 - Failsafe: remove the app's admin from the PC with an adb command (to be given before lock is enabled). Keep a backup alarm during testing.
@@ -24,7 +25,7 @@ adb is at C:\platform-tools (Samsung USB driver installed, `adb devices` works).
 1. Basic daily alarm + test button + volume watchdog + GitHub build workflow  <- Part 1 (DONE)
 2. Volume key lock (dispatchKeyEvent intercept) + stronger watchdog  <- Part 2 (written)
 3. QR scan screen (camera + torch + secret check + 20%/30s once rule)  <- Part 3a DONE+tested; Part 3b written
-4. Device Owner kiosk lockdown + failsafe command
+4. Lockdown WITHOUT Device Owner: screen pinning (startLockTask) + service relaunches the alarm screen via 'Display over other apps'  <- Part 4 (written)
 5. Reboot handling + hardening, Samsung quirks
 6. Testing checklist, final polish
 
@@ -40,8 +41,10 @@ adb is at C:\platform-tools (Samsung USB driver installed, `adb devices` works).
 - Part 1 DONE. Part 2 DONE and tested (volume keys, Back, watchdog OK).
 - Part 2 open problems (need Part 4 / Device Owner): Home leaves the alarm screen; power button shows the power-off menu.
 - Part 3a DONE and tested OK (task chooser + number game).
-- Part 3b written (not yet tested): QR scan screen in AlarmActivity.kt, camera permission request + save guard in MainActivity.kt, quiet-period logic in AlarmService.kt, TaskPrefs.QR_SECRET, manifest CAMERA permission, zxing dependency in app/build.gradle.kts, wakeup-qr.png.
+- Part 3b DONE and tested OK (all 12 steps): QR scan screen in AlarmActivity.kt, camera permission request + save guard in MainActivity.kt, quiet-period logic in AlarmService.kt, TaskPrefs.QR_SECRET, manifest CAMERA permission, zxing dependency in app/build.gradle.kts, wakeup-qr.png.
 - Repo files known: MainActivity, AlarmActivity, AlarmService, AlarmReceiver, BootReceiver, AlarmScheduler, TaskPrefs. Manifest now has the CAMERA permission.
 
+- Part 4 written (not yet tested): AlarmActivity calls startLockTask while ringing and stopLockTask when done; AlarmService relaunches AlarmActivity if it is not in front (needs SYSTEM_ALERT_WINDOW granted by the user); MainActivity has buttons for the overlay permission and security settings (Pin windows). Known gap: power button menu cannot be blocked without Device Owner.
+
 ## NEXT STEP
-User uploads the Part 3b files (AndroidManifest.xml, app/build.gradle.kts, TaskPrefs.kt, AlarmService.kt, AlarmActivity.kt, MainActivity.kt, PROJECT_NOTES.md), waits for the green build, installs, runs the Part 3b test list and reports (if the build fails: send a screenshot of the error). Then Part 4: Device Owner kiosk lockdown + failsafe adb command.
+User uploads AndroidManifest.xml, AlarmActivity.kt, AlarmService.kt, MainActivity.kt, PROJECT_NOTES.md, builds, installs, turns on Pin windows + Display over other apps, runs the Part 4 test list and reports exactly what the pin prompt/Home/power button did. Then Part 5: reboot handling + hardening, Samsung quirks (power menu / side key settings).
