@@ -7,6 +7,9 @@ object TaskPrefs {
     const val TASK_NUMBERS = "numbers"
     const val TASK_QR = "qr"
 
+    /** The secret text inside the printed QR code. Only a code with exactly this text stops the alarm. */
+    const val QR_SECRET = "WAKEUP-1079BBB9BECE6A01"
+
     private const val FILE = "wakeup_prefs"
     private const val KEY = "stop_task"
 
