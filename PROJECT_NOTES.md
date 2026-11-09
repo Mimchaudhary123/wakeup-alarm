@@ -21,15 +21,16 @@ adb is at C:\platform-tools (Samsung USB driver installed, `adb devices` works).
 - Package name: com.wakeup.alarm. Debug keystore is committed (app/debug.keystore) so new builds install over old ones.
 
 ## Parts plan
-1. Basic daily alarm + test button + volume watchdog + GitHub build workflow  <- Part 1 (written)
-2. Volume key lock (onKeyDown intercept) + stronger watchdog
+1. Basic daily alarm + test button + volume watchdog + GitHub build workflow  <- Part 1 (DONE)
+2. Volume key lock (dispatchKeyEvent intercept) + stronger watchdog  <- Part 2 (written)
 3. QR scan screen (camera + torch + secret check + 20%/30s once rule)
 4. Device Owner kiosk lockdown + failsafe command
 5. Reboot handling + hardening, Samsung quirks
 6. Testing checklist, final polish
 
 ## STATUS
-- Part 1 files written and handed to user. Not yet uploaded/built.
+- Part 1 DONE: built on GitHub (workflow file is .github/workflows/main.yml), installed on the M31, tested OK (rings loud, red screen on locked phone, stop button works).
+- Part 2 written and handed over (changed files: AlarmActivity.kt, AlarmService.kt, PROJECT_NOTES.md): volume keys swallowed on the alarm screen, Back button disabled, volume ContentObserver + 200ms watchdog, unmute if muted. Not yet tested by user.
 
 ## NEXT STEP
-User uploads Part 1 to the repo, waits for the green build, installs the APK, tests "Test: ring in 10 seconds", and reports the result (or pastes build errors from the Actions log). Then start Part 2.
+User uploads the 3 Part 2 files to GitHub, waits for the green build, installs the new APK over the old one, runs the Part 2 test list (volume keys on the red screen, volume keys with screen off, Back button) and reports. Then start Part 3 (QR scan screen with camera + torch + secret check + 20%/30s once rule).
