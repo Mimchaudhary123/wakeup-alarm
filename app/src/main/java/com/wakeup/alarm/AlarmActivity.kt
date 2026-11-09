@@ -1,7 +1,9 @@
 package com.wakeup.alarm
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -9,10 +11,19 @@ import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.View
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.ResultPoint
+import com.journeyapps.barcodescanner.BarcodeCallback
+import com.journeyapps.barcodescanner.BarcodeResult
+import com.journeyapps.barcodescanner.DecoratedBarcodeView
+import com.journeyapps.barcodescanner.DefaultDecoderFactory
 import kotlin.random.Random
 
 class AlarmActivity : Activity() {
@@ -27,6 +38,14 @@ class AlarmActivity : Activity() {
     private lateinit var leftView: TextView
     private val optionViews = ArrayList<TextView>()
     private var d = 1f
+
+    // ---- QR task state ----
+    private var barcodeView: DecoratedBarcodeView? = null
+    private var scanning = false
+    private var torchOn = false
+    private lateinit var qrStatus: TextView
+    private lateinit var scanButton: Button
+    private lateinit var torchButton: Button
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,11 +64,144 @@ class AlarmActivity : Activity() {
 
         d = resources.displayMetrics.density
 
-        // The QR task is added in the next update. Until then every alarm uses the number game.
-        when (TaskPrefs.get(this)) {
-            TaskPrefs.TASK_QR -> buildNumberGame()
-            else -> buildNumberGame()
+        // QR task needs the camera permission. If it is missing (or there is no camera),
+        // use the number game so the alarm can never get stuck.
+        if (TaskPrefs.get(this) == TaskPrefs.TASK_QR) {
+            if (canUseCamera()) {
+                buildQrScreen()
+            } else {
+                Toast.makeText(
+                    this, "Camera not available: using the number game", Toast.LENGTH_LONG
+                ).show()
+                buildNumberGame()
+            }
+        } else {
+            buildNumberGame()
         }
+    }
+
+    private fun canUseCamera(): Boolean =
+        checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+
+    // ------------------------------------------------------------------
+    //  QR code task
+    // ------------------------------------------------------------------
+
+    private fun buildQrScreen() {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#121212"))
+            setPadding(dp(12), dp(24), dp(12), dp(12))
+        }
+        root.addView(TextView(this).apply {
+            text = "WAKE UP!"
+            textSize = 40f
+            setTextColor(Color.parseColor("#FF5252"))
+            gravity = Gravity.CENTER
+        })
+        root.addView(TextView(this).apply {
+            text = "Scan your QR code to stop the alarm"
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(4), 0, dp(12))
+        })
+
+        // Middle area: the big button first, the camera view after the button is tapped.
+        val middle = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        scanButton = Button(this).apply {
+            text = "Scan QR code"
+            textSize = 28f
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            ).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) }
+            setOnClickListener { startScanning() }
+        }
+        middle.addView(scanButton)
+
+        val bv = DecoratedBarcodeView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            visibility = View.GONE
+        }
+        barcodeView = bv
+        middle.addView(bv)
+        root.addView(middle)
+
+        qrStatus = TextView(this).apply {
+            textSize = 18f
+            setTextColor(Color.LTGRAY)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        root.addView(qrStatus)
+
+        torchButton = Button(this).apply {
+            text = "Flashlight: OFF"
+            visibility = View.GONE
+            setOnClickListener { toggleTorch() }
+        }
+        root.addView(torchButton)
+
+        setContentView(root)
+    }
+
+    private fun startScanning() {
+        val bv = barcodeView ?: return
+        if (scanning) return
+        scanning = true
+
+        scanButton.visibility = View.GONE
+        bv.visibility = View.VISIBLE
+        if (packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH)) {
+            torchButton.visibility = View.VISIBLE
+        }
+        qrStatus.setTextColor(Color.LTGRAY)
+        qrStatus.text = "Point the camera at the QR code"
+
+        bv.setStatusText("")
+        bv.barcodeView.decoderFactory = DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE))
+        bv.decodeContinuous(object : BarcodeCallback {
+            override fun barcodeResult(result: BarcodeResult) {
+                onQrRead(result.text)
+            }
+
+            override fun possibleResultPoints(resultPoints: List<ResultPoint>) {}
+        })
+        bv.resume()
+
+        // Volume drops to 20% for 30 seconds. Works only once per alarm.
+        AlarmService.startQuietPeriod()
+    }
+
+    private fun onQrRead(text: String?) {
+        if (text == null) return
+        if (text == TaskPrefs.QR_SECRET) {
+            barcodeView?.pause()
+            scanning = false
+            stopService(Intent(this, AlarmService::class.java))
+            finish()
+        } else {
+            qrStatus.setTextColor(Color.parseColor("#FF5252"))
+            qrStatus.text = "Wrong QR code. Find the right one."
+        }
+    }
+
+    private fun toggleTorch() {
+        val bv = barcodeView ?: return
+        if (torchOn) bv.setTorchOff() else bv.setTorchOn()
+        torchOn = !torchOn
+        updateTorchLabel()
+    }
+
+    private fun updateTorchLabel() {
+        torchButton.text = if (torchOn) "Flashlight: ON" else "Flashlight: OFF"
     }
 
     private fun dp(v: Int) = (v * d).toInt()
@@ -209,7 +361,21 @@ class AlarmActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // If the alarm is already stopped (stale screen), close this screen.
-        if (!AlarmService.isRinging) finish()
+        if (!AlarmService.isRinging) {
+            finish()
+            return
+        }
+        if (scanning) {
+            // The camera was released in onPause, so the torch is off again.
+            torchOn = false
+            updateTorchLabel()
+            barcodeView?.resume()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (scanning) barcodeView?.pause()
     }
 
     /** Swallow the volume keys completely while this screen is showing. */

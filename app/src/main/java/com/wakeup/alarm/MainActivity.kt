@@ -3,6 +3,7 @@ package com.wakeup.alarm
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -14,6 +15,7 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.TimePicker
+import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -67,13 +69,19 @@ class MainActivity : Activity() {
             })
             addView(RadioButton(this@MainActivity).apply {
                 id = qrId
-                text = "QR code scan (coming in the next update)"
+                text = "QR code scan"
             })
         }
         root.addView(taskGroup)
         taskGroup.check(
             if (TaskPrefs.get(this) == TaskPrefs.TASK_QR) qrId else numbersId
         )
+        // Choosing QR asks for the camera permission right here.
+        taskGroup.setOnCheckedChangeListener { _, id ->
+            if (id == qrId && !hasCameraPermission()) {
+                requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_REQUEST)
+            }
+        }
 
         root.addView(makeButton("Save and enable daily alarm") {
             saveTask()
@@ -107,11 +115,43 @@ class MainActivity : Activity() {
         refreshStatus()
     }
 
+    private fun hasCameraPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == CAMERA_REQUEST) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                taskGroup.check(numbersId)
+                Toast.makeText(
+                    this,
+                    "Camera not allowed, so QR cannot be used. Number game selected.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            refreshStatus()
+        }
+    }
+
     private fun saveTask() {
-        val task = if (taskGroup.checkedRadioButtonId == qrId) {
+        var task = if (taskGroup.checkedRadioButtonId == qrId) {
             TaskPrefs.TASK_QR
         } else {
             TaskPrefs.TASK_NUMBERS
+        }
+        if (task == TaskPrefs.TASK_QR && !hasCameraPermission()) {
+            // Never save a QR task without camera permission: the alarm could get stuck.
+            task = TaskPrefs.TASK_NUMBERS
+            taskGroup.check(numbersId)
+            Toast.makeText(
+                this,
+                "Camera permission is missing, so Number game was saved.",
+                Toast.LENGTH_LONG
+            ).show()
         }
         TaskPrefs.set(this, task)
     }
@@ -131,10 +171,18 @@ class MainActivity : Activity() {
             "Next alarm: " + f.format(Date(next))
         }
         val taskName = if (TaskPrefs.get(this) == TaskPrefs.TASK_QR) {
-            "QR code scan"
+            if (hasCameraPermission()) {
+                "QR code scan"
+            } else {
+                "QR code scan (camera permission missing, Number game will be used)"
+            }
         } else {
             "Number game"
         }
         status.text = line1 + "\nSaved task: " + taskName
+    }
+
+    companion object {
+        private const val CAMERA_REQUEST = 2
     }
 }

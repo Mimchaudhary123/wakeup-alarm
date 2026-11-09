@@ -18,6 +18,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 
 class AlarmService : Service() {
@@ -30,7 +31,7 @@ class AlarmService : Service() {
     // Backup watchdog: re-checks the alarm volume 5 times per second.
     private val volumeWatchdog = object : Runnable {
         override fun run() {
-            forceMaxVolume()
+            enforceVolume()
             handler.postDelayed(this, 200)
         }
     }
@@ -38,7 +39,7 @@ class AlarmService : Service() {
     // Instant reaction: fires the moment ANY system volume setting changes.
     private val volumeObserver = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean) {
-            forceMaxVolume()
+            enforceVolume()
         }
     }
 
@@ -82,7 +83,7 @@ class AlarmService : Service() {
             wakeLock?.acquire(15 * 60 * 1000L)
         }
 
-        forceMaxVolume()
+        enforceVolume()
         startSound()
 
         if (!observerRegistered) {
@@ -123,16 +124,22 @@ class AlarmService : Service() {
         }
     }
 
-    private fun forceMaxVolume() {
+    private fun enforceVolume() {
         try {
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             if (am.isStreamMute(AudioManager.STREAM_ALARM)) {
                 am.adjustStreamVolume(AudioManager.STREAM_ALARM, AudioManager.ADJUST_UNMUTE, 0)
             }
             val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            // During the one-time quiet period the target is 20%, otherwise max.
+            val target = if (SystemClock.elapsedRealtime() < quietUntil) {
+                maxOf(1, Math.round(max * 0.2f))
+            } else {
+                max
+            }
             // Only write when it actually differs, so we never trigger our own observer in a loop.
-            if (am.getStreamVolume(AudioManager.STREAM_ALARM) != max) {
-                am.setStreamVolume(AudioManager.STREAM_ALARM, max, 0)
+            if (am.getStreamVolume(AudioManager.STREAM_ALARM) != target) {
+                am.setStreamVolume(AudioManager.STREAM_ALARM, target, 0)
             }
         } catch (e: Exception) {
         }
@@ -140,6 +147,8 @@ class AlarmService : Service() {
 
     override fun onDestroy() {
         isRinging = false
+        quietUntil = 0L
+        quietUsed = false
         handler.removeCallbacks(volumeWatchdog)
         if (observerRegistered) {
             contentResolver.unregisterContentObserver(volumeObserver)
@@ -163,5 +172,23 @@ class AlarmService : Service() {
         /** True while an alarm is ringing. The alarm screen uses this to close itself if stale. */
         @Volatile
         var isRinging: Boolean = false
+
+        private const val QUIET_MILLIS = 30_000L
+
+        @Volatile
+        private var quietUntil = 0L
+
+        @Volatile
+        private var quietUsed = false
+
+        /**
+         * Starts the 30 second quiet period (volume 20%). It works ONLY ONCE per alarm:
+         * later calls do nothing. After 30 seconds the watchdog puts the volume back to max.
+         */
+        fun startQuietPeriod() {
+            if (quietUsed || !isRinging) return
+            quietUsed = true
+            quietUntil = SystemClock.elapsedRealtime() + QUIET_MILLIS
+        }
     }
 }
