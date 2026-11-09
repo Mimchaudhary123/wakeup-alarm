@@ -28,9 +28,17 @@ adb is at C:\platform-tools (Samsung USB driver installed, `adb devices` works).
 5. Reboot handling + hardening, Samsung quirks
 6. Testing checklist, final polish
 
+## Task details (decided in chat)
+- Task is chosen on the main screen next to the time picker (radio buttons), saved when "Save and enable daily alarm" or "Test" is pressed. Stored in TaskPrefs ("numbers" default / "qr").
+- Number game: left = random 5-digit number (all digits different, no leading 0) in a random colour. Right = 4 options stacked: the correct one has the SAME digits and a DIFFERENT colour; 3 wrong ones are the same digits in another order (2 are close look-alikes with two neighbouring digits swapped, 1 fully shuffled); 2 of the wrong ones use the SAME colour as the left number (trick). Tap correct -> next round; 10 rounds -> alarm stops; wrong -> back to round 1 with a new question.
+- QR task: app asks for camera permission on the main screen when QR is chosen. If permission is missing at alarm time, fall back to the number game so the alarm can never get stuck.
+- Claude makes up the secret text and gives the user a printable QR image.
+
 ## STATUS
-- Part 1 DONE: built on GitHub (workflow file is .github/workflows/main.yml), installed on the M31, tested OK (rings loud, red screen on locked phone, stop button works).
-- Part 2 written and handed over (changed files: AlarmActivity.kt, AlarmService.kt, PROJECT_NOTES.md): volume keys swallowed on the alarm screen, Back button disabled, volume ContentObserver + 200ms watchdog, unmute if muted. Not yet tested by user.
+- Part 1 DONE. Part 2 DONE and tested (volume keys, Back, watchdog OK).
+- Part 2 open problems (need Part 4 / Device Owner): Home leaves the alarm screen; power button shows the power-off menu.
+- Part 3a written (not yet tested): task chooser in MainActivity.kt + number game in AlarmActivity.kt + TaskPrefs.kt. QR option is shown but still uses the number game.
+- Repo files known: MainActivity, AlarmActivity, AlarmService, AlarmReceiver, BootReceiver, AlarmScheduler, TaskPrefs. Manifest has no camera permission yet.
 
 ## NEXT STEP
-User uploads the 3 Part 2 files to GitHub, waits for the green build, installs the new APK over the old one, runs the Part 2 test list (volume keys on the red screen, volume keys with screen off, Back button) and reports. Then start Part 3 (QR scan screen with camera + torch + secret check + 20%/30s once rule).
+User uploads AlarmActivity.kt, MainActivity.kt, TaskPrefs.kt, PROJECT_NOTES.md, waits for the green build, installs, runs the Part 3a test list and reports. Then Part 3b: QR scan (needs app/build.gradle(.kts) from the user to add the camera/scanner library; manifest camera permission; torch; secret check; 20%/30s once rule; QR image). Then Part 4.
