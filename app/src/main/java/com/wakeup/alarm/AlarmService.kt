@@ -36,6 +36,23 @@ class AlarmService : Service() {
         }
     }
 
+    // Brings the alarm screen back if the person leaves it (for example with Home).
+    // Needs the "Display over other apps" permission, otherwise Android blocks it.
+    private val relaunchWatch = object : Runnable {
+        override fun run() {
+            if (isRinging && !AlarmActivity.isForeground && Settings.canDrawOverlays(this@AlarmService)) {
+                try {
+                    startActivity(
+                        Intent(this@AlarmService, AlarmActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    )
+                } catch (e: Exception) {
+                }
+            }
+            handler.postDelayed(this, 700)
+        }
+    }
+
     // Instant reaction: fires the moment ANY system volume setting changes.
     private val volumeObserver = object : ContentObserver(handler) {
         override fun onChange(selfChange: Boolean) {
@@ -92,6 +109,8 @@ class AlarmService : Service() {
         }
         handler.removeCallbacks(volumeWatchdog)
         handler.post(volumeWatchdog)
+        handler.removeCallbacks(relaunchWatch)
+        handler.postDelayed(relaunchWatch, 2500)
 
         // Try to open the alarm screen directly (the full-screen notification is the backup).
         try {
@@ -150,6 +169,7 @@ class AlarmService : Service() {
         quietUntil = 0L
         quietUsed = false
         handler.removeCallbacks(volumeWatchdog)
+        handler.removeCallbacks(relaunchWatch)
         if (observerRegistered) {
             contentResolver.unregisterContentObserver(volumeObserver)
             observerRegistered = false

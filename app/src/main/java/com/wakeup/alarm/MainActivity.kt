@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -100,6 +101,14 @@ class MainActivity : Activity() {
         root.addView(makeButton("Allow background running (battery settings)") {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         })
+        root.addView(makeButton("Allow display over other apps (keeps alarm on top)") {
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName))
+            )
+        })
+        root.addView(makeButton("Open security settings (turn on Pin windows)") {
+            startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+        })
 
         status = TextView(this).apply {
             textSize = 16f
@@ -179,7 +188,13 @@ class MainActivity : Activity() {
         } else {
             "Number game"
         }
-        status.text = line1 + "\nSaved task: " + taskName
+        val overlay = if (Settings.canDrawOverlays(this)) {
+            "allowed"
+        } else {
+            "NOT allowed (alarm screen cannot come back after Home)"
+        }
+        status.text = line1 + "\nSaved task: " + taskName +
+            "\nDisplay over other apps: " + overlay
     }
 
     companion object {

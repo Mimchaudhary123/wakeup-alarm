@@ -2,6 +2,8 @@ package com.wakeup.alarm
 
 import android.Manifest
 import android.app.Activity
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -185,8 +187,7 @@ class AlarmActivity : Activity() {
         if (text == TaskPrefs.QR_SECRET) {
             barcodeView?.pause()
             scanning = false
-            stopService(Intent(this, AlarmService::class.java))
-            finish()
+            finishAlarm()
         } else {
             qrStatus.setTextColor(Color.parseColor("#FF5252"))
             qrStatus.text = "Wrong QR code. Find the right one."
@@ -345,8 +346,7 @@ class AlarmActivity : Activity() {
     private fun onPicked(n: String) {
         if (n == target) {
             if (round >= totalRounds) {
-                stopService(Intent(this, AlarmService::class.java))
-                finish()
+                finishAlarm()
             } else {
                 round++
                 newQuestion()
@@ -362,9 +362,12 @@ class AlarmActivity : Activity() {
         super.onResume()
         // If the alarm is already stopped (stale screen), close this screen.
         if (!AlarmService.isRinging) {
+            leaveLockTask()
             finish()
             return
         }
+        isForeground = true
+        enterLockTask()
         if (scanning) {
             // The camera was released in onPause, so the torch is off again.
             torchOn = false
@@ -375,7 +378,31 @@ class AlarmActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        isForeground = false
         if (scanning) barcodeView?.pause()
+    }
+
+    /** Screen pinning: blocks Home, Recents and the notification shade while the alarm rings. */
+    private fun enterLockTask() {
+        try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            if (am.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) startLockTask()
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun leaveLockTask() {
+        try {
+            stopLockTask()
+        } catch (e: Exception) {
+        }
+    }
+
+    /** The task is done: stop the alarm, release the screen pin and close. */
+    private fun finishAlarm() {
+        stopService(Intent(this, AlarmService::class.java))
+        leaveLockTask()
+        finish()
     }
 
     /** Swallow the volume keys completely while this screen is showing. */
@@ -392,5 +419,11 @@ class AlarmActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
         // intentionally empty
+    }
+
+    companion object {
+        /** True while the alarm screen is in front. The service re-opens it if this goes false. */
+        @Volatile
+        var isForeground: Boolean = false
     }
 }
