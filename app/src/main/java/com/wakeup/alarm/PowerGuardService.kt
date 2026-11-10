@@ -5,31 +5,40 @@ import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * Power guard (no black cover).
+ * Power guard.
  *
- * While the alarm rings, any other window that opens on top of the alarm screen (the
- * power-off menu) starts a Back-press loop: Back every 0.25 s, the alarm screen is
- * re-opened once, and the loop keeps going while new windows are reported (4 s at most per loop).
- * Back does nothing on the alarm screen (onBackPressed is empty), so extra presses are harmless.
+ * When another window (the power-off menu) opens while the alarm rings, two things start at
+ * the same moment:
  *
- * Nothing is drawn on the screen, so the alarm screen can never be covered or blocked.
- * The guard does NOT depend on the pin state. The pin state is only written to the status line.
+ * 1) CLOSING (harmless): Back every 0.12 s, the alarm screen re-opened at about 0.24 s,
+ *    0.9 s and 1.9 s. Back does nothing on the alarm screen (onBackPressed is empty).
+ *    A new window reported meanwhile keeps the loop going (4 s at most per loop).
+ *
+ * 2) TOUCH BLOCKER (invisible, nothing is drawn): swallows every tap for 2 seconds, so the
+ *    Power off / Restart buttons cannot be tapped even while the menu is still visible.
+ *    Safety: it removes itself with its own timer after 2 s (never extended), and cannot
+ *    appear again for 3 s afterwards, so the alarm screen is always usable for 3 s in a row.
  *
  * The last 5 decisions are written to the status line in the app ("Last other window...").
  */
 class PowerGuardService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
+    private var blocker: View? = null
+    private var blockerAllowedAt = 0L
 
     private var backActive = false
     private var backStart = 0L
@@ -39,17 +48,24 @@ class PowerGuardService : AccessibilityService() {
     private val log = ArrayList<String>()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
+    private val removeBlocker = Runnable { removeBlockerNow() }
+
     private val tick = object : Runnable {
         override fun run() {
             if (!backActive) return
-            if (!AlarmService.isRinging || SystemClock.elapsedRealtime() >= backUntil) {
+            if (!AlarmService.isRinging) {
+                backActive = false
+                removeBlockerNow()
+                return
+            }
+            if (SystemClock.elapsedRealtime() >= backUntil) {
                 backActive = false
                 return
             }
             performGlobalAction(GLOBAL_ACTION_BACK)
             tickCount++
-            if (tickCount == 3) bringAlarmBack()
-            handler.postDelayed(this, 250)
+            if (tickCount == 2 || tickCount == 8 || tickCount == 16) bringAlarmBack()
+            handler.postDelayed(this, 120)
         }
     }
 
@@ -59,24 +75,67 @@ class PowerGuardService : AccessibilityService() {
         if (!AlarmService.isRinging) return
 
         val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName) return // our own alarm screen is fine
+        if (pkg == packageName) return // our own alarm screen / blocker is fine
 
         val cls = (event.className?.toString() ?: "").substringAfterLast('.')
         val who = "$pkg/$cls"
-
         val now = SystemClock.elapsedRealtime()
+
         if (backActive) {
-            backUntil = minOf(now + 1500, backStart + 4000)
-            note("$who -> extend [pin=${pinState()}]")
+            backUntil = minOf(now + 2000, backStart + 4000)
+            val b = tryBlocker(now)
+            note("$who -> extend" + (if (b) " +block" else "") + " [pin=${pinState()}]")
             return
         }
 
         backActive = true
         backStart = now
-        backUntil = now + 1500
+        backUntil = now + 2000
         tickCount = 0
+        val b = tryBlocker(now)
         handler.post(tick)
-        note("$who -> GUARD [pin=${pinState()}]")
+        note("$who -> GUARD" + (if (b) " +block" else " (no block)") + " [pin=${pinState()}]")
+    }
+
+    /** Starts the invisible touch blocker if the last one ended at least 3 s ago. */
+    private fun tryBlocker(now: Long): Boolean {
+        if (blocker != null || now < blockerAllowedAt) return false
+        showBlocker()
+        if (blocker == null) return false
+        blockerAllowedAt = now + 2000 + 3000
+        handler.removeCallbacks(removeBlocker)
+        handler.postDelayed(removeBlocker, 2000)
+        return true
+    }
+
+    private fun showBlocker() {
+        if (blocker != null) return
+        try {
+            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val v = View(this)
+            v.setOnTouchListener { _, _ -> true } // swallow every touch
+            val lp = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            )
+            wm.addView(v, lp)
+            blocker = v
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun removeBlockerNow() {
+        val v = blocker ?: return
+        try {
+            (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v)
+        } catch (e: Exception) {
+        }
+        blocker = null
     }
 
     /** For the status line only: what Android says about the pin right now. */
@@ -113,11 +172,14 @@ class PowerGuardService : AccessibilityService() {
     override fun onInterrupt() {
         backActive = false
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(removeBlocker)
+        removeBlockerNow()
     }
 
     override fun onDestroy() {
         backActive = false
         handler.removeCallbacksAndMessages(null)
+        removeBlockerNow()
         super.onDestroy()
     }
 
