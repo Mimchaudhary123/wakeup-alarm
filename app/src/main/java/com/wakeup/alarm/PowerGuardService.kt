@@ -15,10 +15,11 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 
 /**
- * Power guard: while the alarm rings, anything that opens on top of the alarm screen
- * (for example the power-off menu) is covered instantly and then closed again and again
- * (Back press every 0.25 s, alarm screen re-opened every 1 s) for up to 5 seconds.
- * The cover is removed only when this guard period is over.
+ * Power guard (SAFE version).
+ * When a foreign window (for example the power-off menu) opens while the alarm rings:
+ *  - a black cover is shown for AT MOST 1.5 seconds (hard timer removes it at 1.8 s),
+ *  - Back is pressed every 0.25 s and the alarm screen is re-opened once,
+ *  - the guard can NEVER be extended, and after it ends there is a 3 second cooldown.
  */
 class PowerGuardService : AccessibilityService() {
 
@@ -26,17 +27,21 @@ class PowerGuardService : AccessibilityService() {
     private var cover: View? = null
     private var guarding = false
     private var guardUntil = 0L
+    private var cooldownUntil = 0L
     private var tickCount = 0
+
+    private val hardStop = Runnable { stopGuard() }
 
     private val tick = object : Runnable {
         override fun run() {
+            if (!guarding) return
             if (!AlarmService.isRinging || SystemClock.elapsedRealtime() >= guardUntil) {
                 stopGuard()
                 return
             }
             performGlobalAction(GLOBAL_ACTION_BACK)
             tickCount++
-            if (tickCount % 4 == 2) bringAlarmBack()
+            if (tickCount == 3) bringAlarmBack()
             handler.postDelayed(this, 250)
         }
     }
@@ -54,14 +59,16 @@ class PowerGuardService : AccessibilityService() {
         getSharedPreferences("power_guard", Context.MODE_PRIVATE)
             .edit().putString("guard_last", "$pkg / $cls").apply()
 
-        // Cover the screen and (re)start the repeated closing for 5 seconds.
+        val now = SystemClock.elapsedRealtime()
+        if (guarding) return          // never extend a running guard
+        if (now < cooldownUntil) return // never chain guards
+
+        guarding = true
+        guardUntil = now + 1500
+        tickCount = 0
         showCover()
-        guardUntil = SystemClock.elapsedRealtime() + 5000
-        if (!guarding) {
-            guarding = true
-            tickCount = 0
-            handler.post(tick)
-        }
+        handler.post(tick)
+        handler.postDelayed(hardStop, 1800)
     }
 
     private fun bringAlarmBack() {
@@ -77,7 +84,9 @@ class PowerGuardService : AccessibilityService() {
     private fun stopGuard() {
         guarding = false
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(hardStop)
         removeCoverNow()
+        cooldownUntil = SystemClock.elapsedRealtime() + 3000
     }
 
     private fun showCover() {
