@@ -9,19 +9,31 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.TextClock
 import android.widget.TextView
 import android.widget.Toast
 import kotlin.random.Random
 
+/**
+ * Three screens in one activity:
+ *  1) LANDING: big "Stop alarm" button (the alarm keeps ringing).
+ *  2) TASK:    the number game. The first time it opens, the alarm volume drops to 50% for 30 s.
+ *  3) DHIKR:   shown after the task. Closes ONLY with its Close button.
+ */
 class AlarmActivity : Activity() {
 
     private val totalRounds = 10
     private val optionCount = 4
 
+    private var stage = STAGE_LANDING
     private var round = 1
     private var target = ""
 
@@ -49,13 +61,86 @@ class AlarmActivity : Activity() {
                     WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
             )
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
         d = resources.displayMetrics.density
-        buildNumberGame()
+        showLanding()
     }
 
     private fun dp(v: Int) = (v * d).toInt()
+
+    // ------------------------------------------------------------------
+    //  1) Landing screen
+    // ------------------------------------------------------------------
+
+    private fun showLanding() {
+        stage = STAGE_LANDING
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(brown)
+            setPadding(dp(24), dp(56), dp(24), dp(40))
+        }
+        root.addView(TextView(this).apply {
+            text = "WAKE UP!"
+            textSize = 44f
+            setTextColor(glowGold)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        })
+        root.addView(TextClock(this).apply {
+            format12Hour = "h:mm a"
+            format24Hour = "h:mm a"
+            textSize = 52f
+            setTextColor(paleGold)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(16), 0, 0)
+        })
+        root.addView(spacer())
+        root.addView(Button(this).apply {
+            text = "Stop alarm"
+            setAllCaps(false)
+            textSize = 32f
+            setTextColor(brown)
+            setTypeface(typeface, Typeface.BOLD)
+            stateListAnimator = null
+            background = GradientDrawable().apply {
+                setColor(glowGold)
+                cornerRadius = dp(28).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(150)
+            )
+            setOnClickListener { startTask() }
+        })
+        root.addView(TextView(this).apply {
+            text = "Tap it, then finish the task to stop the alarm."
+            textSize = 14f
+            setTextColor(Color.parseColor("#D9C497"))
+            gravity = Gravity.CENTER
+            setPadding(0, dp(14), 0, 0)
+        })
+        root.addView(spacer())
+        setContentView(root)
+    }
+
+    private fun spacer(): View = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+    }
+
+    // ------------------------------------------------------------------
+    //  2) Number task
+    // ------------------------------------------------------------------
+
+    private fun startTask() {
+        stage = STAGE_TASK
+        round = 1
+        optionViews.clear()
+        buildNumberGame()
+        // Volume drops to 50% for 30 seconds. Works only once per alarm.
+        AlarmService.startQuietPeriod()
+    }
 
     private fun buildNumberGame() {
         val root = LinearLayout(this).apply {
@@ -209,16 +294,105 @@ class AlarmActivity : Activity() {
         }
     }
 
+    // ------------------------------------------------------------------
+    //  3) Dhikr screen (after the task)
+    // ------------------------------------------------------------------
+
+    /** The task is done: stop the alarm, release the screen pin and show the dhikr screen. */
+    private fun finishAlarm() {
+        // Mark the alarm as stopped right away, so nothing reopens the alarm screen
+        // while the service is still shutting down.
+        AlarmService.isRinging = false
+        stopService(Intent(this, AlarmService::class.java))
+        leaveLockTask()
+        showDhikr()
+    }
+
+    private fun showDhikr() {
+        stage = STAGE_DHIKR
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(brown)
+            setPadding(dp(16), dp(28), dp(16), dp(16))
+        }
+        root.addView(TextView(this).apply {
+            text = "Begin your day with dhikr"
+            textSize = 20f
+            setTextColor(glowGold)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(8))
+        })
+
+        val texts = listOf(
+            "Subhan Allah",
+            "Alhamdulillah",
+            "Allahu Akbar",
+            "L\u0101 il\u0101ha ill-all\u0101hu, wa\u1e25dahu l\u0101 shar\u012bka lah, " +
+                "lahul-mulku wa lahul-\u1e25amdu, wa huwa \u02bfal\u0101 kulli shay'in qad\u012br"
+        )
+        val weights = listOf(1f, 1f, 1f, 2.4f)
+        for (i in texts.indices) {
+            val tv = TextView(this).apply {
+                text = texts[i]
+                setTextColor(brown)
+                setTypeface(typeface, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                background = GradientDrawable().apply {
+                    setColor(paleGold)
+                    cornerRadius = dp(16).toFloat()
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, weights[i]
+                ).apply { setMargins(0, dp(6), 0, dp(6)) }
+            }
+            // The text shrinks or grows to fit its box, so nothing ever needs scrolling.
+            tv.setAutoSizeTextTypeUniformWithConfiguration(
+                14, if (i < 3) 40 else 26, 1, TypedValue.COMPLEX_UNIT_SP
+            )
+            root.addView(tv)
+        }
+
+        root.addView(Button(this).apply {
+            text = "Close"
+            setAllCaps(false)
+            textSize = 22f
+            setTextColor(brown)
+            setTypeface(typeface, Typeface.BOLD)
+            stateListAnimator = null
+            background = GradientDrawable().apply {
+                setColor(glowGold)
+                cornerRadius = dp(18).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(60)
+            ).apply { setMargins(0, dp(10), 0, 0) }
+            setOnClickListener { finish() }
+        })
+        setContentView(root)
+    }
+
+    // ------------------------------------------------------------------
+    //  Lifecycle, pinning, keys
+    // ------------------------------------------------------------------
+
     override fun onResume() {
         super.onResume()
-        // If the alarm is already stopped (stale screen), close this screen.
-        if (!AlarmService.isRinging) {
-            leaveLockTask()
-            finish()
+        if (AlarmService.isRinging) {
+            // A new alarm started while an old dhikr screen was still open: start over.
+            if (stage == STAGE_DHIKR) showLanding()
+            isForeground = true
+            enterLockTask()
             return
         }
-        isForeground = true
-        enterLockTask()
+        // Not ringing: only the dhikr screen may stay. Any other screen is stale.
+        if (stage != STAGE_DHIKR) {
+            leaveLockTask()
+            finish()
+        }
     }
 
     override fun onPause() {
@@ -242,30 +416,29 @@ class AlarmActivity : Activity() {
         }
     }
 
-    /** The task is done: stop the alarm, release the screen pin and close. */
-    private fun finishAlarm() {
-        stopService(Intent(this, AlarmService::class.java))
-        leaveLockTask()
-        finish()
-    }
-
-    /** Swallow the volume keys completely while this screen is showing. */
+    /** Swallow the volume keys completely while the alarm is still ringing. */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_VOLUME_UP,
-            KeyEvent.KEYCODE_VOLUME_DOWN,
-            KeyEvent.KEYCODE_VOLUME_MUTE -> return true
+        if (stage != STAGE_DHIKR) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP,
+                KeyEvent.KEYCODE_VOLUME_DOWN,
+                KeyEvent.KEYCODE_VOLUME_MUTE -> return true
+            }
         }
         return super.dispatchKeyEvent(event)
     }
 
-    /** Back button does nothing while the alarm is ringing. */
+    /** Back does nothing while the alarm rings. On the dhikr screen it closes the screen. */
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        // intentionally empty
+        if (stage == STAGE_DHIKR) finish()
     }
 
     companion object {
+        private const val STAGE_LANDING = 0
+        private const val STAGE_TASK = 1
+        private const val STAGE_DHIKR = 2
+
         /** True while the alarm screen is in front. The service re-opens it if this goes false. */
         @Volatile
         var isForeground: Boolean = false

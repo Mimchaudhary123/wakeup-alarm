@@ -16,9 +16,12 @@ import android.media.RingtoneManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
+import android.media.audiofx.LoudnessEnhancer
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.Settings
 
 class AlarmService : Service() {
@@ -27,6 +30,9 @@ class AlarmService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private val handler = Handler(Looper.getMainLooper())
     private var observerRegistered = false
+    private var enhancer: LoudnessEnhancer? = null
+    private var enhancerOn = false
+    private var vibrator: Vibrator? = null
 
     // Backup watchdog: re-checks the alarm volume 5 times per second.
     private val volumeWatchdog = object : Runnable {
@@ -94,6 +100,8 @@ class AlarmService : Service() {
             startForeground(NOTIF_ID, notification)
         }
 
+        startVibration()
+
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (wakeLock == null) {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wakeup:alarm")
@@ -139,6 +147,52 @@ class AlarmService : Service() {
                 prepare()
                 start()
             }
+            setupBoost()
+        } catch (e: Exception) {
+        }
+    }
+
+    /** Extra loudness on top of the maximum alarm volume (see BOOST_MILLIBELS). */
+    private fun setupBoost() {
+        try {
+            val p = player ?: return
+            val e = LoudnessEnhancer(p.audioSessionId)
+            e.setTargetGain(BOOST_MILLIBELS)
+            e.setEnabled(true)
+            enhancer = e
+            enhancerOn = true
+        } catch (ex: Exception) {
+        }
+    }
+
+    private fun setBoost(on: Boolean) {
+        val e = enhancer ?: return
+        if (on == enhancerOn) return
+        try {
+            e.setEnabled(on)
+            enhancerOn = on
+        } catch (ex: Exception) {
+        }
+    }
+
+    /** Strong vibration that starts at once and repeats until the alarm is stopped. */
+    @Suppress("DEPRECATION")
+    private fun startVibration() {
+        try {
+            val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            vibrator = v
+            val timings = longArrayOf(0, 1000, 300)
+            val amplitudes = intArrayOf(0, 255, 0)
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            val effect = try {
+                VibrationEffect.createWaveform(timings, amplitudes, 0)
+            } catch (ex: Exception) {
+                VibrationEffect.createWaveform(timings, 0)
+            }
+            v.vibrate(effect, attrs)
         } catch (e: Exception) {
         }
     }
@@ -150,12 +204,14 @@ class AlarmService : Service() {
                 am.adjustStreamVolume(AudioManager.STREAM_ALARM, AudioManager.ADJUST_UNMUTE, 0)
             }
             val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-            // During the one-time quiet period the target is 20%, otherwise max.
-            val target = if (SystemClock.elapsedRealtime() < quietUntil) {
-                maxOf(1, Math.round(max * 0.2f))
+            // During the one-time quiet period the target is 50%, otherwise max (plus the boost).
+            val quiet = SystemClock.elapsedRealtime() < quietUntil
+            val target = if (quiet) {
+                maxOf(1, Math.round(max * QUIET_FRACTION))
             } else {
                 max
             }
+            setBoost(!quiet)
             // Only write when it actually differs, so we never trigger our own observer in a loop.
             if (am.getStreamVolume(AudioManager.STREAM_ALARM) != target) {
                 am.setStreamVolume(AudioManager.STREAM_ALARM, target, 0)
@@ -180,6 +236,16 @@ class AlarmService : Service() {
         }
         player?.release()
         player = null
+        try {
+            vibrator?.cancel()
+        } catch (e: Exception) {
+        }
+        vibrator = null
+        try {
+            enhancer?.release()
+        } catch (e: Exception) {
+        }
+        enhancer = null
         if (wakeLock?.isHeld == true) wakeLock?.release()
         wakeLock = null
         super.onDestroy()
@@ -194,6 +260,13 @@ class AlarmService : Service() {
         var isRinging: Boolean = false
 
         private const val QUIET_MILLIS = 30_000L
+        private const val QUIET_FRACTION = 0.5f
+
+        /**
+         * Loudness boost on top of the maximum alarm volume, in millibels (100 = 1 dB).
+         * 800 = about +8 dB. Raise it for louder, lower it if the sound crackles. 0 = no boost.
+         */
+        private const val BOOST_MILLIBELS = 800
 
         @Volatile
         private var quietUntil = 0L
@@ -202,7 +275,7 @@ class AlarmService : Service() {
         private var quietUsed = false
 
         /**
-         * Starts the 30 second quiet period (volume 20%). It works ONLY ONCE per alarm:
+         * Starts the 30 second quiet period (volume 50%). It works ONLY ONCE per alarm:
          * later calls do nothing. After 30 seconds the watchdog puts the volume back to max.
          */
         fun startQuietPeriod() {
