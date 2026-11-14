@@ -1,10 +1,12 @@
 package com.wakeup.alarm
 
+import android.Manifest
 import android.accessibilityservice.AccessibilityService
 import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
@@ -169,6 +171,16 @@ class PowerGuardService : AccessibilityService() {
             .edit().putString("guard_last", log.joinToString("\n")).apply()
     }
 
+    /** The system restarts this service by itself, so use that moment to set everything up again. */
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        try {
+            AlarmScheduler.scheduleAll(this)
+            ReminderScheduler.scheduleNext(this)
+        } catch (e: Exception) {
+        }
+    }
+
     override fun onInterrupt() {
         backActive = false
         handler.removeCallbacks(tick)
@@ -184,6 +196,32 @@ class PowerGuardService : AccessibilityService() {
     }
 
     companion object {
+        /**
+         * Switches the Power guard on by itself, so it never has to be turned on by hand again.
+         * Works only after this one-time command from a PC:
+         * adb shell pm grant com.wakeup.alarm android.permission.WRITE_SECURE_SETTINGS
+         */
+        fun ensureEnabled(ctx: Context): Boolean {
+            if (isEnabled(ctx)) return true
+            if (ctx.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) return false
+            return try {
+                val me = ComponentName(ctx, PowerGuardService::class.java).flattenToString()
+                val current = Settings.Secure.getString(
+                    ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                ) ?: ""
+                val updated = if (current.isEmpty()) me else "$current:$me"
+                Settings.Secure.putString(
+                    ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, updated
+                )
+                Settings.Secure.putString(ctx.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, "1")
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
+
         /** True when the person has switched the Power guard on in Accessibility settings. */
         fun isEnabled(ctx: Context): Boolean {
             val enabled = Settings.Secure.getString(

@@ -6,7 +6,9 @@ import android.content.Intent
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        // After reboot, app update, or time/timezone change: schedule every alarm again.
+        // After reboot, app update, or time/timezone change: set everything up again.
         AlarmScheduler.scheduleAll(context)
+        ReminderScheduler.scheduleNext(context)
+        PowerGuardService.ensureEnabled(context)
     }
 }

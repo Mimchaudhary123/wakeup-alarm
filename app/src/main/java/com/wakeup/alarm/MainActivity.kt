@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.Dialog
+import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -54,6 +55,9 @@ class MainActivity : Activity() {
     private lateinit var alarmList: LinearLayout
     private lateinit var emptyText: TextView
     private var d = 1f
+    private lateinit var reminderSwitch: Switch
+    private lateinit var reminderSub: TextView
+    private var updatingReminder = false
 
     // For Akhirah colours (from the colour video)
     private val brown = Color.parseColor("#603E1E")
@@ -179,6 +183,49 @@ class MainActivity : Activity() {
             Toast.makeText(this, "The test alarm will ring in 10 seconds.", Toast.LENGTH_SHORT).show()
         })
 
+        // ---------------- istigfar + durud reminders ----------------
+        val remCard = card()
+        remCard.addView(label("REMINDERS", softBrown))
+        val remRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        val remInfo = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, wrapContent, 1f)
+        }
+        remInfo.addView(TextView(this).apply {
+            text = "Istigfar and Durud"
+            textSize = 20f
+            setTextColor(brown)
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        reminderSub = TextView(this).apply {
+            textSize = 14f
+            setTextColor(softBrown)
+        }
+        remInfo.addView(reminderSub)
+        remRow.addView(remInfo)
+        reminderSwitch = Switch(this)
+        styleSwitch(reminderSwitch)
+        reminderSwitch.setOnCheckedChangeListener { _, on ->
+            if (!updatingReminder) {
+                ReminderScheduler.setOn(this, on)
+                ReminderScheduler.scheduleNext(this)
+                refreshStatus()
+            }
+        }
+        remRow.addView(reminderSwitch)
+        remCard.addView(remRow)
+        remCard.addView(styledButton("Change times", Color.TRANSPARENT, brown, brown) {
+            showReminderSettings()
+        })
+        remCard.addView(styledButton("Preview a reminder now", Color.TRANSPARENT, brown, brown) {
+            ReminderScheduler.show(this, ReminderScheduler.nextType(this))
+        })
+        body.addView(remCard)
+
         // ---------------- diagnostics (hidden until tapped) ----------------
         val diagTitle = TextView(this).apply {
             text = "Diagnostics \u25BE"
@@ -208,6 +255,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Set everything up again, so nothing depends on the phone remembering it.
+        PowerGuardService.ensureEnabled(this)
+        AlarmScheduler.scheduleAll(this)
+        ReminderScheduler.scheduleNext(this)
         refreshAll()
     }
 
@@ -619,6 +670,140 @@ class MainActivity : Activity() {
     //  Permissions window
     // ------------------------------------------------------------------
 
+    // ------------------------------------------------------------------
+    //  Reminder settings window
+    // ------------------------------------------------------------------
+
+    private fun styleSwitch(sw: Switch) {
+        sw.thumbTintList = ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+            intArrayOf(glowGold, Color.parseColor("#A89570"))
+        )
+        sw.trackTintList = ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+            intArrayOf(Color.parseColor("#8A5F2E"), Color.parseColor("#8C7A5E"))
+        )
+    }
+
+    private fun everyText(min: Int): String =
+        if (min < 60) "Every $min min" else if (min == 60) "Every hour" else "Every ${min / 60} hours"
+
+    private fun showReminderSettings() {
+        val s = ReminderScheduler.settings(this)
+        var startMin = s.startMin
+        var endMin = s.endMin
+        var every = s.everyMin
+
+        val dlg = Dialog(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(14))
+        }
+        content.addView(TextView(this).apply {
+            text = "Reminder times"
+            textSize = 20f
+            setTextColor(brown)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(8))
+        })
+
+        val fromBtn = styledButton(
+            "From: " + timeText(startMin / 60, startMin % 60), Color.TRANSPARENT, brown, brown
+        ) {}
+        fromBtn.setOnClickListener {
+            TimePickerDialog(
+                this,
+                TimePickerDialog.OnTimeSetListener { _, h, m ->
+                    startMin = h * 60 + m
+                    fromBtn.text = "From: " + timeText(h, m)
+                },
+                startMin / 60, startMin % 60, false
+            ).show()
+        }
+        val toBtn = styledButton(
+            "To: " + timeText(endMin / 60, endMin % 60), Color.TRANSPARENT, brown, brown
+        ) {}
+        toBtn.setOnClickListener {
+            TimePickerDialog(
+                this,
+                TimePickerDialog.OnTimeSetListener { _, h, m ->
+                    endMin = h * 60 + m
+                    toBtn.text = "To: " + timeText(h, m)
+                },
+                endMin / 60, endMin % 60, false
+            ).show()
+        }
+        content.addView(fromBtn)
+        content.addView(toBtn)
+        content.addView(TextView(this).apply {
+            text = "12:00 AM as the end time means midnight."
+            textSize = 12f
+            setTextColor(softBrown)
+            setPadding(0, dp(2), 0, dp(10))
+        })
+
+        content.addView(label("REMIND ME", softBrown))
+        val everyValues = listOf(30, 60, 120, 180)
+        val everyLabels = listOf("30 min", "1 hour", "2 hours", "3 hours")
+        val chipViews = ArrayList<TextView>()
+        val chipRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        fun styleEvery() {
+            for (i in everyValues.indices) {
+                val on = everyValues[i] == every
+                chipViews[i].setTextColor(if (on) paleGold else brown)
+                chipViews[i].background = GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat()
+                    setColor(if (on) brown else Color.TRANSPARENT)
+                    setStroke(dp(1), brown)
+                }
+            }
+        }
+        for (i in everyValues.indices) {
+            val chip = TextView(this).apply {
+                text = everyLabels[i]
+                textSize = 14f
+                gravity = Gravity.CENTER
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(10), 0, dp(10))
+                layoutParams = LinearLayout.LayoutParams(0, wrapContent, 1f).apply {
+                    setMargins(dp(2), 0, dp(2), 0)
+                }
+            }
+            chip.setOnClickListener {
+                every = everyValues[i]
+                styleEvery()
+            }
+            chipViews.add(chip)
+            chipRow.addView(chip)
+        }
+        styleEvery()
+        content.addView(chipRow)
+
+        val buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(6), 0, 0)
+        }
+        val cancelBtn = styledButton("Cancel", Color.TRANSPARENT, brown, brown) { dlg.dismiss() }
+        val saveBtn = styledButton("Save", brown, paleGold, Color.TRANSPARENT) {
+            ReminderScheduler.saveTimes(this, startMin, endMin, every)
+            ReminderScheduler.scheduleNext(this)
+            dlg.dismiss()
+            refreshAll()
+            Toast.makeText(this, "Reminder times saved.", Toast.LENGTH_SHORT).show()
+        }
+        for (b in listOf(cancelBtn, saveBtn)) {
+            b.layoutParams = LinearLayout.LayoutParams(0, wrapContent, 1f).apply {
+                setMargins(dp(4), dp(6), dp(4), dp(6))
+            }
+            buttons.addView(b)
+        }
+        content.addView(buttons)
+        showSheet(dlg, content)
+    }
+
     private fun permissionRows(): List<PermRow> {
         val rows = ArrayList<PermRow>()
         rows.add(
@@ -637,10 +822,33 @@ class MainActivity : Activity() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         rows.add(
             PermRow(
-                "Background running", "Lets the alarm ring on time",
+                "Background running", "Lets the alarm and reminders run on time",
                 pm.isIgnoringBatteryOptimizations(packageName), true
             ) {
-                openSettings(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                try {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            Uri.parse("package:" + packageName)
+                        )
+                    )
+                } catch (e: Exception) {
+                    openSettings(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }
+            }
+        )
+        rows.add(
+            PermRow(
+                "Sleeping apps (Samsung)",
+                "Open App info > Battery: turn off sleeping for this app (cannot be checked here)",
+                null, false
+            ) {
+                openSettings(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + packageName)
+                    )
+                )
             }
         )
         rows.add(
@@ -760,6 +968,19 @@ class MainActivity : Activity() {
             permSummary.text = "\u2713 All set"
         } else {
             permSummary.text = "$missing need attention"
+        }
+
+        val rs = ReminderScheduler.settings(this)
+        updatingReminder = true
+        reminderSwitch.isChecked = rs.on
+        updatingReminder = false
+        val rn = ReminderScheduler.nextTrigger(this)
+        reminderSub.text = if (!rs.on) {
+            "Off"
+        } else {
+            everyText(rs.everyMin) + ", " + timeText(rs.startMin / 60, rs.startMin % 60) +
+                " - " + timeText(rs.endMin / 60, rs.endMin % 60) +
+                (if (rn != null) "\nNext: " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(rn)) else "")
         }
 
         val guard = if (PowerGuardService.isEnabled(this)) "ON" else "OFF"
