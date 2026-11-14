@@ -70,6 +70,9 @@ class AlarmService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isRinging = true
+        // Remember that an alarm is ringing, so it can start again if the phone restarts.
+        getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_RINGING_SINCE, System.currentTimeMillis()).apply()
 
         val alarmIntent = Intent(this, AlarmActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -222,6 +225,9 @@ class AlarmService : Service() {
 
     override fun onDestroy() {
         isRinging = false
+        // The alarm was stopped on purpose (task done): forget it.
+        getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_RINGING_SINCE).apply()
         quietUntil = 0L
         quietUsed = false
         handler.removeCallbacks(volumeWatchdog)
@@ -252,6 +258,9 @@ class AlarmService : Service() {
     }
 
     companion object {
+        const val STATE_PREFS = "alarm_state"
+        const val KEY_RINGING_SINCE = "ringing_since"
+
         private const val CHANNEL_ID = "wakeup_alarm"
         private const val NOTIF_ID = 1001
 

@@ -1,50 +1,36 @@
-# Wakeup Alarm - PROJECT NOTES (paste this into any new Claude chat/account)
+# For Akhirah (package com.wakeup.alarm) - PROJECT NOTES
+Paste this into any new Claude chat. Continue from "STATUS" below. Do not re-plan.
 
-Instruction for Claude: continue EXACTLY from the NEXT STEP below. Do not re-plan. Give the user clear, numbered, beginner-level instructions for anything they must do. Write complete files, one part at a time.
+## How to work with the user (important)
+- Give READY-MADE files in a zip (folder structure = repo structure, root folder `app`) to drag into GitHub. Never ask the user to type or edit code by hand.
+- No helper scripts (.bat), no extra PC steps beyond: upload to GitHub -> wait for green build -> download APK -> `adb install -r wakeup.apk` from C:\platform-tools.
+- Give precise click-by-click steps. Analyse and verify first, then give the solution. Be honest about what could not be tested (no compiler or phone is available to Claude).
+- User: Windows 10 PC, Chrome, narrow browser window (GitHub upload is behind the "+" button next to "Go to file"). Phone: Samsung Galaxy M31, Android 12, One UI Core 4.1.
+- GitHub: Mimchaudhary123/wakeup-alarm (currently Public, holds app/debug.keystore; advise making it private). APK is built by GitHub Actions -> Artifacts. No Android Studio.
 
-## Goal
-Personal Android alarm app (not for Play Store, user's own use). Alarm must be impossible to escape while half-asleep.
-User: Windows 10 PC, Chrome. Phone: Samsung Galaxy M31, Android 12, One UI Core 4.1.
-GitHub account: Mimchaudhary123, private repo "wakeup-alarm". APK is built by GitHub Actions (no Android Studio). User downloads APK from Actions -> Artifacts.
-adb is at C:\platform-tools (Samsung USB driver installed, `adb devices` works).
+## What the app does
+Personal Android alarm, built so it is hard to escape half asleep. Name "For Akhirah". Colours: Brown #603E1E, Pale Gold #F1D9A8, Glowing Gold #FFC34D. Logo = praying boy silhouette from the user's own picture (PNG in res/drawable-nodpi: ic_launcher_fg.png, ic_logo_img.png).
 
-## Decided design
-- Task to stop the alarm: scan a specific QR code (secret text in the code) stuck in bathroom/kitchen. Only the correct code counts.
-- While scanning: alarm volume drops to 20% for 30 seconds, ONLY ONCE per alarm, then back to max. If no valid scan, volume returns to max.
-- Flashlight (torch) ON while scanning (power cuts).
-- Volume keys locked while ringing + watchdog forcing alarm volume to max.
-- Home/Back/Recents/notification shade/power menu/safe boot blocked via Device Owner kiosk (lock task) mode. Fallback for phones without Device Owner: screen pinning.
-- (Device Owner is NOT possible: the user's phone has many important accounts that cannot be removed, and adb set-device-owner needs no accounts. Part 4 uses screen pinning + overlay-permission relaunch instead.)
-- Block force-stop/uninstall, time changes, factory reset via Device Owner policies.
-- Reboot: save state, relaunch alarm after boot.
-- Failsafe: remove the app's admin from the PC with an adb command (to be given before lock is enabled). Keep a backup alarm during testing.
-- APK must be shareable to family phones (works as a normal alarm without Device Owner).
-- Package name: com.wakeup.alarm. Debug keystore is committed (app/debug.keystore) so new builds install over old ones.
+- Multiple alarms (like Turbo Alarm): time + repeat days OR one date, label, per-alarm on/off switch, edit, delete. Stored as JSON in SharedPreferences (AlarmScheduler.kt). Old single alarm migrates automatically.
+- When an alarm rings: LANDING screen (big "Stop alarm" button + clock) -> number task (10 rounds, wrong answer = back to round 1) -> dhikr screen (4 lines, fits without scrolling, closes ONLY with its Close button).
+- While ringing: volume watchdog forces max alarm volume (+8 dB LoudnessEnhancer boost, BOOST_MILLIBELS in AlarmService), strong repeating vibration, volume keys and Back swallowed, screen pinning (startLockTask), AlarmService relaunches the alarm screen if left (needs "Display over other apps").
+- Task start: volume drops to 50% for 30 s, ONCE per alarm, then back to max.
+- PowerGuardService (accessibility service): when another window (power-off menu) opens while ringing, it presses Back every 0.12 s, re-opens the alarm screen, and shows an invisible touch blocker for 2 s (max, then 3 s pause) so Power off cannot be tapped. Tested OK by the user.
+- Reminders: Istigfar and Durud screens alternate, default every hour 6:00 AM to 12:00 AM, on/off switch + changeable times (ReminderScheduler.kt, ReminderActivity.kt). Skipped while an alarm rings.
+- If the phone restarts while an alarm is ringing (task not finished) the alarm rings again after boot (within 30 min).
+- QR task was removed completely.
 
-## Parts plan
-1. Basic daily alarm + test button + volume watchdog + GitHub build workflow  <- Part 1 (DONE)
-2. Volume key lock (dispatchKeyEvent intercept) + stronger watchdog  <- Part 2 (written)
-3. QR scan screen (camera + torch + secret check + 20%/30s once rule)  <- Part 3a DONE+tested; Part 3b written
-4. Lockdown WITHOUT Device Owner: screen pinning (startLockTask) + service relaunches the alarm screen via 'Display over other apps'  <- Part 4 (written)
-5. Reboot handling + hardening, Samsung quirks
-6. Testing checklist, final polish
+## Files (all in app/src/main/java/com/wakeup/alarm unless noted)
+MainActivity, AlarmActivity, AlarmService, AlarmScheduler (AlarmItem + storage + scheduling), AlarmReceiver, BootReceiver, PowerGuardService, ReminderScheduler (+ReminderReceiver), ReminderActivity, TaskPrefs (empty, can be deleted).
+Resources: app/src/main/res/xml/power_guard_config.xml (NO android:description attribute, a plain string there breaks the build), drawable/ic_launcher_background.xml, drawable-nodpi/*.png, layout/view_time_picker.xml, mipmap-anydpi-v26/ic_launcher.xml. Manifest: app/src/main/AndroidManifest.xml. Build file: app/build.gradle.kts (no extra libraries).
 
-## Task details (decided in chat)
-- Task is chosen on the main screen next to the time picker (radio buttons), saved when "Save and enable daily alarm" or "Test" is pressed. Stored in TaskPrefs ("numbers" default / "qr").
-- Number game: left = random 5-digit number (all digits different, no leading 0) in a random colour. Right = 4 options stacked: the correct one has the SAME digits and a DIFFERENT colour; 3 wrong ones are the same digits in another order (2 are close look-alikes with two neighbouring digits swapped, 1 fully shuffled); 2 of the wrong ones use the SAME colour as the left number (trick). Tap correct -> next round; 10 rounds -> alarm stops; wrong -> back to round 1 with a new question.
-- QR task details (decided): camera starts ONLY after the user taps a big "Scan QR code" button. Camera stays on until the correct code is scanned (no 30s camera timeout). Flashlight is a user-controlled ON/OFF button (default OFF). When the button is tapped the alarm volume drops to 20% for 30 s, ONCE per alarm (AlarmService.startQuietPeriod), then the watchdog returns it to max; later scans have no quiet period. QR is printed at a shop; tested from the PC screen first.
-- QR library: com.journeyapps:zxing-android-embedded:4.3.0 (added to app/build.gradle.kts). Secret text is TaskPrefs.QR_SECRET; image file wakeup-qr.png.
-- QR task: app asks for camera permission on the main screen when QR is chosen. If permission is missing at alarm time, fall back to the number game so the alarm can never get stuck.
-- Claude makes up the secret text and gives the user a printable QR image.
+## Known facts
+- Samsung switches the accessibility service (Power guard) OFF after every reinstall: the user switches it on again in Permissions -> Power guard.
+- User must allow once: Display over other apps, Background running (battery), Power guard, Pin windows (Security settings), Samsung "sleeping apps" off for this app.
+- A plain string in power_guard_config.xml description caused build error #20; the attribute was removed.
 
 ## STATUS
-- Part 1 DONE. Part 2 DONE and tested (volume keys, Back, watchdog OK).
-- Part 2 open problems (need Part 4 / Device Owner): Home leaves the alarm screen; power button shows the power-off menu.
-- Part 3a DONE and tested OK (task chooser + number game).
-- Part 3b DONE and tested OK (all 12 steps): QR scan screen in AlarmActivity.kt, camera permission request + save guard in MainActivity.kt, quiet-period logic in AlarmService.kt, TaskPrefs.QR_SECRET, manifest CAMERA permission, zxing dependency in app/build.gradle.kts, wakeup-qr.png.
-- Repo files known: MainActivity, AlarmActivity, AlarmService, AlarmReceiver, BootReceiver, AlarmScheduler, TaskPrefs. Manifest now has the CAMERA permission.
-
-- Part 4 written (not yet tested): AlarmActivity calls startLockTask while ringing and stopLockTask when done; AlarmService relaunches AlarmActivity if it is not in front (needs SYSTEM_ALERT_WINDOW granted by the user); MainActivity has buttons for the overlay permission and security settings (Pin windows). Known gap: power button menu cannot be blocked without Device Owner.
+Parts 1-3 done and installed. Part 4 (this update): alarm resumes after a phone restart + these notes.
 
 ## NEXT STEP
-User uploads AndroidManifest.xml, AlarmActivity.kt, AlarmService.kt, MainActivity.kt, PROJECT_NOTES.md, builds, installs, turns on Pin windows + Display over other apps, runs the Part 4 test list and reports exactly what the pin prompt/Home/power button did. Then Part 5: reboot handling + hardening, Samsung quirks (power menu / side key settings).
+Part 5 = final testing, no new features: (1) overnight real alarm test with a backup alarm on the normal clock app, (2) restart the phone while the alarm rings, (3) reminders for a whole day, (4) make the GitHub repo private. Fix only what the user reports.
