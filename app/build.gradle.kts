@@ -11,8 +11,8 @@ android {
         applicationId = "com.wakeup.alarm"
         minSdk = 26
         targetSdk = 33
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "1.0"
     }
 
     // Fixed signing key so every new build can be installed OVER the previous one.
@@ -41,6 +41,5 @@ android {
 }
 
 dependencies {
-    // QR scanner view with camera + flashlight support
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // No extra libraries needed (the QR scanner was removed).
 }
