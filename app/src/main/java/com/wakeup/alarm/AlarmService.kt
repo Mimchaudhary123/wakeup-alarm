@@ -23,6 +23,7 @@ import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
+import java.io.File
 
 class AlarmService : Service() {
 
@@ -68,11 +69,17 @@ class AlarmService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** Storage that works even before the phone is unlocked after a restart. */
+    private fun stateStore() =
+        createDeviceProtectedStorageContext().getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isRinging = true
         // Remember that an alarm is ringing, so it can start again if the phone restarts.
-        getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
-            .putLong(KEY_RINGING_SINCE, System.currentTimeMillis()).apply()
+        try {
+            stateStore().edit().putLong(KEY_RINGING_SINCE, System.currentTimeMillis()).apply()
+        } catch (e: Exception) {
+        }
 
         val alarmIntent = Intent(this, AlarmActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -145,6 +152,42 @@ class AlarmService : Service() {
                         .build()
                 )
                 setDataSource(this@AlarmService, uri)
+                isLooping = true
+                setVolume(1.0f, 1.0f)
+                prepare()
+                start()
+            }
+            setupBoost()
+        } catch (e: Exception) {
+            startSoundFromFile()
+        }
+    }
+
+    /** Finds a ringtone file in the system folders (they can be read before the first unlock). */
+    private fun systemSoundPath(): String? {
+        for (dir in listOf(
+            "/system/media/audio/alarms", "/product/media/audio/alarms",
+            "/system/media/audio/ringtones", "/product/media/audio/ringtones"
+        )) {
+            val files = File(dir).listFiles()?.filter { it.isFile }?.sortedBy { it.name }
+            if (files != null && files.isNotEmpty()) return files[0].absolutePath
+        }
+        return null
+    }
+
+    /** Backup sound, used when the normal alarm sound cannot be opened (for example before the first unlock). */
+    private fun startSoundFromFile() {
+        try {
+            if (player != null) return
+            val path = systemSoundPath() ?: return
+            player = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setDataSource(path)
                 isLooping = true
                 setVolume(1.0f, 1.0f)
                 prepare()
@@ -226,8 +269,10 @@ class AlarmService : Service() {
     override fun onDestroy() {
         isRinging = false
         // The alarm was stopped on purpose (task done): forget it.
-        getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
-            .remove(KEY_RINGING_SINCE).apply()
+        try {
+            stateStore().edit().remove(KEY_RINGING_SINCE).apply()
+        } catch (e: Exception) {
+        }
         quietUntil = 0L
         quietUsed = false
         handler.removeCallbacks(volumeWatchdog)

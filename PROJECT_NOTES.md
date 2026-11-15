@@ -15,9 +15,13 @@ Personal Android alarm, built so it is hard to escape half asleep. Name "For Akh
 - When an alarm rings: LANDING screen (big "Stop alarm" button + clock) -> number task (10 rounds, wrong answer = back to round 1) -> dhikr screen (4 lines, fits without scrolling, closes ONLY with its Close button).
 - While ringing: volume watchdog forces max alarm volume (+8 dB LoudnessEnhancer boost, BOOST_MILLIBELS in AlarmService), strong repeating vibration, volume keys and Back swallowed, screen pinning (startLockTask), AlarmService relaunches the alarm screen if left (needs "Display over other apps").
 - Task start: volume drops to 50% for 30 s, ONCE per alarm, then back to max.
-- PowerGuardService (accessibility service): when another window (power-off menu) opens while ringing, it presses Back every 0.12 s, re-opens the alarm screen, and shows an invisible touch blocker for 2 s (max, then 3 s pause) so Power off cannot be tapped. Tested OK by the user.
+- PowerGuardService (accessibility service): when another window (power-off menu) opens while ringing, it presses Back every 0.12 s, re-opens the alarm screen, and shows an invisible touch blocker for 4 s (max, then 1 s pause) so Power off cannot be tapped. Tested OK by the user.
 - Reminders: Istigfar and Durud screens alternate, default every hour 6:00 AM to 12:00 AM, on/off switch + changeable times (ReminderScheduler.kt, ReminderActivity.kt). Skipped while an alarm rings.
-- If the phone restarts while an alarm is ringing (task not finished) the alarm rings again after boot (within 30 min).
+- If the phone restarts while an alarm is ringing (task not finished) the alarm rings again after boot (within 30 min), BEFORE the first unlock (Direct Boot: LockedBootReceiver, directBootAware AlarmService/AlarmActivity, ringing state in device-protected storage, backup sound from /system/media). The Power guard cannot run before the first unlock.
+- Limits (be honest with the user): the power button and its key combinations are handled by Android before any app or accessibility service sees them, so an app cannot block them. The accessibility key filter does NOT stop Power+Volume Down. A hardware forced restart or a completed power off cannot be stopped; the app only blocks the power menu route and resumes the alarm after a restart.
+- Permission gate (MainActivity + PermissionGate.kt): every time the app opens, a full-screen overlay walks through whatever is off, one step at a time (Notifications, Display over other apps, Run in the background, Power guard, Pin windows, Sleeping apps). The first four are checked automatically; Pin windows and Sleeping apps cannot be detected, so the user confirms them once with "I turned it on". No alarm can be added while a step is pending. A "Skip this step" link appears after 3 tries so nobody is ever stuck.
+- Permission watch: PermissionWatchReceiver checks every 30 min (and 1 min after boot/update) and shows a "needs attention" notification when an alarm or the reminders are on and something detectable is off (typically Power guard after a reinstall).
+- Self-healing: alarms, reminders and the watch are re-armed when the app opens, after boot or an update, and whenever the Power guard service restarts. Android cannot be forced to keep permissions on, this is the best an app can do without adb.
 - QR task was removed completely.
 
 ## Files (all in app/src/main/java/com/wakeup/alarm unless noted)
@@ -30,7 +34,7 @@ Resources: app/src/main/res/xml/power_guard_config.xml (NO android:description a
 - A plain string in power_guard_config.xml description caused build error #20; the attribute was removed.
 
 ## STATUS
-Parts 1-3 done and installed. Part 4 (this update): alarm resumes after a phone restart + these notes.
+Parts 1-4 done. Final update (this one): alarm resumes before unlock after a restart, touch blocker 4 s on / 1 s off, permission gate + watch notification.
 
 ## NEXT STEP
-Part 5 = final testing, no new features: (1) overnight real alarm test with a backup alarm on the normal clock app, (2) restart the phone while the alarm rings, (3) reminders for a whole day, (4) make the GitHub repo private. Fix only what the user reports.
+Part 5 = final testing, no new features. Also check the Diagnostics lines in the app after any shutdown incident: (1) overnight real alarm test with a backup alarm on the normal clock app, (2) restart the phone while the alarm rings, (3) reminders for a whole day, (4) make the GitHub repo private. Fix only what the user reports.

@@ -27,12 +27,12 @@ import java.util.Locale
  *
  * 1) CLOSING (harmless): Back every 0.12 s, the alarm screen re-opened at about 0.24 s,
  *    0.9 s and 1.9 s. Back does nothing on the alarm screen (onBackPressed is empty).
- *    A new window reported meanwhile keeps the loop going (4 s at most per loop).
+ *    A new window reported meanwhile keeps the loop going (6 s at most per loop).
  *
- * 2) TOUCH BLOCKER (invisible, nothing is drawn): swallows every tap for 2 seconds, so the
+ * 2) TOUCH BLOCKER (invisible, nothing is drawn): swallows every tap for 4 seconds, so the
  *    Power off / Restart buttons cannot be tapped even while the menu is still visible.
- *    Safety: it removes itself with its own timer after 2 s (never extended), and cannot
- *    appear again for 3 s afterwards, so the alarm screen is always usable for 3 s in a row.
+ *    Safety: it removes itself with its own timer after 4 s (never extended), and cannot
+ *    appear again for 1 s afterwards, so the alarm screen is always usable for 1 s in a row.
  *
  * The last 5 decisions are written to the status line in the app ("Last other window...").
  */
@@ -84,7 +84,7 @@ class PowerGuardService : AccessibilityService() {
         val now = SystemClock.elapsedRealtime()
 
         if (backActive) {
-            backUntil = minOf(now + 2000, backStart + 4000)
+            backUntil = minOf(now + 3000, backStart + 6000)
             val b = tryBlocker(now)
             note("$who -> extend" + (if (b) " +block" else "") + " [pin=${pinState()}]")
             return
@@ -92,7 +92,7 @@ class PowerGuardService : AccessibilityService() {
 
         backActive = true
         backStart = now
-        backUntil = now + 2000
+        backUntil = now + 3000
         tickCount = 0
         val b = tryBlocker(now)
         handler.post(tick)
@@ -104,9 +104,9 @@ class PowerGuardService : AccessibilityService() {
         if (blocker != null || now < blockerAllowedAt) return false
         showBlocker()
         if (blocker == null) return false
-        blockerAllowedAt = now + 2000 + 3000
+        blockerAllowedAt = now + 4000 + 1000
         handler.removeCallbacks(removeBlocker)
-        handler.postDelayed(removeBlocker, 2000)
+        handler.postDelayed(removeBlocker, 4000)
         return true
     }
 
@@ -177,6 +177,7 @@ class PowerGuardService : AccessibilityService() {
         try {
             AlarmScheduler.scheduleAll(this)
             ReminderScheduler.scheduleNext(this)
+            PermissionGate.watch(this)
         } catch (e: Exception) {
         }
     }

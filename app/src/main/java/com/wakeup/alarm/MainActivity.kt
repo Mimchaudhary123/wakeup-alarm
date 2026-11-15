@@ -25,6 +25,7 @@ import android.view.Window
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -58,6 +59,19 @@ class MainActivity : Activity() {
     private lateinit var reminderSwitch: Switch
     private lateinit var reminderSub: TextView
     private var updatingReminder = false
+
+    // permission gate (full-screen overlay shown until everything needed is on)
+    private lateinit var gateView: FrameLayout
+    private lateinit var gateStep: TextView
+    private lateinit var gateTitle: TextView
+    private lateinit var gateWhy: TextView
+    private lateinit var gateHow: TextView
+    private lateinit var gateButton: Button
+    private lateinit var gateDone: Button
+    private lateinit var gateSkip: TextView
+    private var gateCurrentId = ""
+    private var gateTaps = 0
+    private val gateSkipped = HashSet<String>()
 
     // For Akhirah colours (from the colour video)
     private val brown = Color.parseColor("#603E1E")
@@ -176,7 +190,8 @@ class MainActivity : Activity() {
         body.addView(emptyText)
 
         body.addView(styledButton("Add alarm", glowGold, brown, Color.TRANSPARENT) {
-            showEditor(null)
+            // An alarm can only be placed when everything the app needs is on.
+            if (gatePending().isEmpty()) showEditor(null) else refreshGate()
         })
         body.addView(styledButton("Test: ring in 10 seconds", Color.TRANSPARENT, paleGold, paleGold) {
             AlarmScheduler.scheduleTest(this, 10_000)
@@ -246,11 +261,16 @@ class MainActivity : Activity() {
         body.addView(diagText)
 
         page.addView(body)
-        setContentView(ScrollView(this).apply {
+        val scroll = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(brown)
             addView(page)
-        })
+        }
+        gateView = buildGate()
+        val root = FrameLayout(this)
+        root.addView(scroll, FrameLayout.LayoutParams(matchParent, matchParent))
+        root.addView(gateView, FrameLayout.LayoutParams(matchParent, matchParent))
+        setContentView(root)
     }
 
     override fun onResume() {
@@ -259,7 +279,10 @@ class MainActivity : Activity() {
         PowerGuardService.ensureEnabled(this)
         AlarmScheduler.scheduleAll(this)
         ReminderScheduler.scheduleNext(this)
+        PermissionGate.watch(this)
+        PermissionGate.scheduleWatch(this)
         refreshAll()
+        refreshGate()
     }
 
     // ------------------------------------------------------------------
@@ -673,6 +696,126 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------
     //  Reminder settings window
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    //  Permission gate: walks through every missing permission, one by one
+    // ------------------------------------------------------------------
+
+    private fun gatePending(): List<PermStep> =
+        PermissionGate.steps().filter { !it.isOk(this) && it.id !in gateSkipped }
+
+    private fun buildGate(): FrameLayout {
+        val v = FrameLayout(this)
+        v.setBackgroundColor(brown)
+        v.visibility = View.GONE
+        v.isClickable = true // swallows touches, so nothing underneath can be used
+
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(28), dp(56), dp(28), dp(28))
+        }
+        col.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_logo_img)
+            layoutParams = LinearLayout.LayoutParams(dp(84), dp(84))
+        })
+        gateStep = TextView(this).apply {
+            textSize = 12f
+            letterSpacing = 0.1f
+            setTextColor(softOnBrown)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(20), 0, dp(6))
+        }
+        col.addView(gateStep)
+        gateTitle = TextView(this).apply {
+            textSize = 28f
+            setTextColor(glowGold)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        }
+        col.addView(gateTitle)
+        gateWhy = TextView(this).apply {
+            textSize = 17f
+            setTextColor(paleGold)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(14), 0, dp(10))
+        }
+        col.addView(gateWhy)
+        gateHow = TextView(this).apply {
+            textSize = 15f
+            setTextColor(softOnBrown)
+            gravity = Gravity.CENTER
+        }
+        col.addView(gateHow)
+        col.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(matchParent, 0, 1f)
+        })
+        gateButton = styledButton("Open settings", glowGold, brown, Color.TRANSPARENT) { onGateOpen() }
+        col.addView(gateButton)
+        gateDone = styledButton("I turned it on", Color.TRANSPARENT, paleGold, paleGold) { onGateDone() }
+        col.addView(gateDone)
+        gateSkip = TextView(this).apply {
+            text = "Cannot turn this on? Skip this step (the alarm may fail)"
+            textSize = 13f
+            setTextColor(softOnBrown)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(4))
+            setOnClickListener {
+                gateSkipped.add(gateCurrentId)
+                refreshGate()
+            }
+        }
+        col.addView(gateSkip)
+        v.addView(col, FrameLayout.LayoutParams(matchParent, matchParent))
+        return v
+    }
+
+    /** Shows the first step that is still off, or hides the gate when everything is on. */
+    private fun refreshGate() {
+        val all = PermissionGate.steps()
+        val pending = gatePending()
+        if (pending.isEmpty()) {
+            gateView.visibility = View.GONE
+            return
+        }
+        val step = pending[0]
+        if (gateCurrentId != step.id) {
+            gateCurrentId = step.id
+            gateTaps = 0
+        }
+        val number = all.indexOfFirst { it.id == step.id } + 1
+        gateStep.text = "STEP $number OF ${all.size}"
+        gateTitle.text = step.title
+        gateWhy.text = step.why
+        gateHow.text = step.how
+        gateButton.text = if (step.manual) "Open settings" else "Turn it on"
+        gateDone.visibility = if (step.manual) View.VISIBLE else View.GONE
+        // Only offered after a few tries, so nobody is ever stuck on a step that will not switch on.
+        gateSkip.visibility = if (gateTaps >= 3) View.VISIBLE else View.GONE
+        gateView.visibility = View.VISIBLE
+    }
+
+    private fun onGateOpen() {
+        val step = PermissionGate.steps().firstOrNull { it.id == gateCurrentId } ?: return
+        gateTaps++
+        try {
+            startActivity(step.intent(this))
+        } catch (e: Exception) {
+            openSettings(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + packageName)
+                )
+            )
+        }
+        refreshGate()
+    }
+
+    private fun onGateDone() {
+        PermissionGate.confirm(this, gateCurrentId)
+        refreshGate()
+    }
 
     private fun styleSwitch(sw: Switch) {
         sw.thumbTintList = ColorStateList(
