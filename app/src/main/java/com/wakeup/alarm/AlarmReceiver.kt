@@ -19,6 +19,16 @@ class AlarmReceiver : BroadcastReceiver() {
                 AlarmScheduler.scheduleOne(context, alarm)
             }
         }
+        // Remember the kind of ring, for the wake-up check after the task:
+        // a real alarm gets the full check, the check test button a fast one, a plain test none.
+        WakeCheck.markRing(
+            context,
+            when {
+                id > 0 -> WakeCheck.MODE_REAL
+                id == AlarmScheduler.TEST_CHECK_ID -> WakeCheck.MODE_FAST
+                else -> 0
+            }
+        )
         // id 0 is the "ring in 10 seconds" test, -1 is an old alarm: both just ring.
         context.startForegroundService(Intent(context, AlarmService::class.java))
     }

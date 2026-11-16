@@ -19,6 +19,8 @@ class LockedBootReceiver : BroadcastReceiver() {
         fun resumeAlarmIfNeeded(context: Context) {
             try {
                 if (AlarmService.isRinging) return
+                // Restarting the phone during the wake-up check rings the alarm again.
+                if (WakeCheck.ringIfPending(context)) return
                 val state = context.createDeviceProtectedStorageContext()
                     .getSharedPreferences(AlarmService.STATE_PREFS, Context.MODE_PRIVATE)
                 val since = state.getLong(AlarmService.KEY_RINGING_SINCE, 0L)

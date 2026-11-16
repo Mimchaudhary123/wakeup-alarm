@@ -37,7 +37,9 @@ object AlarmScheduler {
 
     const val EXTRA_ALARM_ID = "alarm_id"
     const val TEST_ID = 0
+    const val TEST_CHECK_ID = -2
     private const val TEST_REQUEST = 999999
+    private const val TEST_CHECK_REQUEST = 999998
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -216,6 +218,11 @@ object AlarmScheduler {
         scheduleAt(c, TEST_ID, System.currentTimeMillis() + delayMillis)
     }
 
+    /** A test ring that is followed by a fast wake-up check (30 s later, 1 minute to finish it). */
+    fun scheduleTestWithCheck(c: Context, delayMillis: Long) {
+        scheduleAt(c, TEST_CHECK_ID, System.currentTimeMillis() + delayMillis)
+    }
+
     private fun scheduleAt(c: Context, id: Int, triggerAt: Long) {
         val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val showIntent = PendingIntent.getActivity(
@@ -233,7 +240,11 @@ object AlarmScheduler {
 
     private fun firePendingIntent(c: Context, id: Int): PendingIntent {
         val intent = Intent(c, AlarmReceiver::class.java).putExtra(EXTRA_ALARM_ID, id)
-        val request = if (id == TEST_ID) TEST_REQUEST else id
+        val request = when (id) {
+            TEST_ID -> TEST_REQUEST
+            TEST_CHECK_ID -> TEST_CHECK_REQUEST
+            else -> id
+        }
         return PendingIntent.getBroadcast(
             c, request, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

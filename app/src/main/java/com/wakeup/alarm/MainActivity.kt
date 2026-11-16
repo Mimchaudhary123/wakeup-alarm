@@ -59,6 +59,10 @@ class MainActivity : Activity() {
     private lateinit var reminderSwitch: Switch
     private lateinit var reminderSub: TextView
     private var updatingReminder = false
+    private lateinit var statIstBig: TextView
+    private lateinit var statIstSmall: TextView
+    private lateinit var statDurBig: TextView
+    private lateinit var statDurSmall: TextView
 
     // permission gate (full-screen overlay shown until everything needed is on)
     private lateinit var gateView: FrameLayout
@@ -101,7 +105,8 @@ class MainActivity : Activity() {
 
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(brown)
+            clipChildren = false
+            clipToPadding = false
         }
 
         // ---------------- header with logo ----------------
@@ -110,10 +115,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(24), dp(20), dp(12))
         }
-        header.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_logo_img)
-            layoutParams = LinearLayout.LayoutParams(dp(60), dp(60))
-        })
+        header.addView(Glow.logoWithGlow(this, R.drawable.ic_logo_img, 60))
         val titles = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(wrapContent, wrapContent).apply {
@@ -125,6 +127,8 @@ class MainActivity : Activity() {
             textSize = 26f
             setTextColor(glowGold)
             setTypeface(typeface, Typeface.BOLD)
+            Glow.textGlow(this, dp(10).toFloat())
+            Glow.shimmer(this)
         })
         titles.addView(TextView(this).apply {
             text = "Wake up with purpose"
@@ -137,6 +141,8 @@ class MainActivity : Activity() {
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), dp(24))
+            clipChildren = false
+            clipToPadding = false
         }
 
         // ---------------- next alarm ----------------
@@ -156,6 +162,52 @@ class MainActivity : Activity() {
         }
         nextCard.addView(nextAlarmSub)
         body.addView(nextCard)
+
+        // ---------------- istigfar + durud counters ----------------
+        val statCard = card()
+        statCard.addView(label("TODAY'S READINGS", softBrown))
+        val statRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(6), 0, 0)
+        }
+        fun statColumn(title: String): Pair<TextView, TextView> {
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(0, wrapContent, 1f)
+            }
+            col.addView(TextView(this).apply {
+                text = title
+                textSize = 15f
+                setTextColor(softBrown)
+                setTypeface(typeface, Typeface.BOLD)
+                gravity = Gravity.CENTER
+            })
+            val big = TextView(this).apply {
+                textSize = 42f
+                setTextColor(brown)
+                setTypeface(typeface, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                Glow.textGlow(this, dp(8).toFloat())
+            }
+            val small = TextView(this).apply {
+                textSize = 12f
+                setTextColor(softBrown)
+                gravity = Gravity.CENTER
+            }
+            col.addView(big)
+            col.addView(small)
+            statRow.addView(col)
+            return Pair(big, small)
+        }
+        val istCol = statColumn("Istigfar")
+        statIstBig = istCol.first
+        statIstSmall = istCol.second
+        val durCol = statColumn("Durud")
+        statDurBig = durCol.first
+        statDurSmall = durCol.second
+        statCard.addView(statRow)
+        body.addView(statCard)
 
         // ---------------- permissions (one button) ----------------
         body.addView(styledButton("Permissions", Color.TRANSPARENT, paleGold, paleGold) {
@@ -192,10 +244,18 @@ class MainActivity : Activity() {
         body.addView(styledButton("Add alarm", glowGold, brown, Color.TRANSPARENT) {
             // An alarm can only be placed when everything the app needs is on.
             if (gatePending().isEmpty()) showEditor(null) else refreshGate()
-        })
+        }.also { Glow.pulse(it, dp(1).toFloat(), dp(9).toFloat()) })
         body.addView(styledButton("Test: ring in 10 seconds", Color.TRANSPARENT, paleGold, paleGold) {
             AlarmScheduler.scheduleTest(this, 10_000)
             Toast.makeText(this, "The test alarm will ring in 10 seconds.", Toast.LENGTH_SHORT).show()
+        })
+        body.addView(styledButton("Test the wake-up check", Color.TRANSPARENT, paleGold, paleGold) {
+            AlarmScheduler.scheduleTestWithCheck(this, 10_000)
+            Toast.makeText(
+                this,
+                "Rings in 10 s. Finish the task: the two checks open 15 s and 45 s later.",
+                Toast.LENGTH_LONG
+            ).show()
         })
 
         // ---------------- istigfar + durud reminders ----------------
@@ -240,6 +300,9 @@ class MainActivity : Activity() {
             ReminderScheduler.show(this, ReminderScheduler.nextType(this))
         })
         body.addView(remCard)
+        body.addView(styledButton("Read Sayyidul Istighfar", Color.TRANSPARENT, paleGold, paleGold) {
+            showDua()
+        })
 
         // ---------------- diagnostics (hidden until tapped) ----------------
         val diagTitle = TextView(this).apply {
@@ -263,11 +326,12 @@ class MainActivity : Activity() {
         page.addView(body)
         val scroll = ScrollView(this).apply {
             isFillViewport = true
-            setBackgroundColor(brown)
             addView(page)
         }
         gateView = buildGate()
         val root = FrameLayout(this)
+        root.background = Glow.background(this)
+        root.addView(GlowRaysView(this), FrameLayout.LayoutParams(matchParent, matchParent))
         root.addView(scroll, FrameLayout.LayoutParams(matchParent, matchParent))
         root.addView(gateView, FrameLayout.LayoutParams(matchParent, matchParent))
         setContentView(root)
@@ -294,10 +358,8 @@ class MainActivity : Activity() {
     private fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(16), dp(14), dp(16), dp(16))
-        background = GradientDrawable().apply {
-            setColor(paleGold)
-            cornerRadius = dp(16).toFloat()
-        }
+        background = Glow.paleCard(dp(16).toFloat())
+        Glow.shadowGlow(this, dp(5).toFloat())
         layoutParams = LinearLayout.LayoutParams(matchParent, wrapContent).apply {
             setMargins(0, 0, 0, dp(12))
         }
@@ -320,12 +382,17 @@ class MainActivity : Activity() {
         setTextColor(textColor)
         setTypeface(typeface, Typeface.BOLD)
         stateListAnimator = null
-        val shape = GradientDrawable().apply {
-            setColor(fill)
-            cornerRadius = dp(14).toFloat()
-            if (stroke != Color.TRANSPARENT) setStroke(dp(2), stroke)
+        val shape: GradientDrawable = if (fill == glowGold) {
+            Glow.goldFill(dp(14).toFloat())
+        } else {
+            GradientDrawable().apply {
+                setColor(fill)
+                cornerRadius = dp(14).toFloat()
+                if (stroke != Color.TRANSPARENT) setStroke(dp(2), stroke)
+            }
         }
         background = RippleDrawable(ColorStateList.valueOf(Color.argb(40, 0, 0, 0)), shape, null)
+        if (fill == glowGold) Glow.shadowGlow(this, dp(6).toFloat())
         minHeight = 0
         minimumHeight = 0
         setPadding(dp(16), dp(14), dp(16), dp(14))
@@ -417,10 +484,15 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(12), dp(12), dp(12))
-            background = GradientDrawable().apply {
-                setColor(if (a.enabled) paleGold else Color.parseColor("#C9B48A"))
-                cornerRadius = dp(16).toFloat()
+            background = if (a.enabled) {
+                Glow.paleCard(dp(16).toFloat())
+            } else {
+                GradientDrawable().apply {
+                    setColor(Color.parseColor("#C9B48A"))
+                    cornerRadius = dp(16).toFloat()
+                }
             }
+            if (a.enabled) Glow.shadowGlow(this, dp(4).toFloat())
             layoutParams = LinearLayout.LayoutParams(matchParent, wrapContent).apply {
                 setMargins(0, 0, 0, dp(10))
             }
@@ -706,7 +778,8 @@ class MainActivity : Activity() {
 
     private fun buildGate(): FrameLayout {
         val v = FrameLayout(this)
-        v.setBackgroundColor(brown)
+        v.background = Glow.background(this)
+        v.addView(GlowRaysView(this), FrameLayout.LayoutParams(matchParent, matchParent))
         v.visibility = View.GONE
         v.isClickable = true // swallows touches, so nothing underneath can be used
 
@@ -715,10 +788,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(28), dp(56), dp(28), dp(28))
         }
-        col.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_logo_img)
-            layoutParams = LinearLayout.LayoutParams(dp(84), dp(84))
-        })
+        col.addView(Glow.logoWithGlow(this, R.drawable.ic_logo_img, 70))
         gateStep = TextView(this).apply {
             textSize = 12f
             letterSpacing = 0.1f
@@ -752,6 +822,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(matchParent, 0, 1f)
         })
         gateButton = styledButton("Open settings", glowGold, brown, Color.TRANSPARENT) { onGateOpen() }
+        Glow.pulse(gateButton, dp(1).toFloat(), dp(9).toFloat())
         col.addView(gateButton)
         gateDone = styledButton("I turned it on", Color.TRANSPARENT, paleGold, paleGold) { onGateDone() }
         col.addView(gateDone)
@@ -815,6 +886,43 @@ class MainActivity : Activity() {
     private fun onGateDone() {
         PermissionGate.confirm(this, gateCurrentId)
         refreshGate()
+    }
+
+    /** The Sayyidul Istighfar picture: open it, read it, close it, whenever you want. */
+    private fun showDua() {
+        val dlg = Dialog(this)
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(14), dp(12), dp(12))
+        }
+        root.addView(TextView(this).apply {
+            text = "Sayyidul Istighfar"
+            textSize = 20f
+            setTextColor(brown)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(8))
+        })
+        val scroll = ScrollView(this)
+        scroll.layoutParams = LinearLayout.LayoutParams(matchParent, 0, 1f)
+        val img = ImageView(this)
+        img.setImageResource(R.drawable.dua_sayyidul_istighfar)
+        img.adjustViewBounds = true
+        img.scaleType = ImageView.ScaleType.FIT_CENTER
+        scroll.addView(img, ViewGroup.LayoutParams(matchParent, wrapContent))
+        root.addView(scroll)
+        root.addView(styledButton("Close", brown, paleGold, Color.TRANSPARENT) { dlg.dismiss() })
+        dlg.setContentView(root)
+        dlg.window?.setBackgroundDrawable(GradientDrawable().apply {
+            setColor(paleGold)
+            cornerRadius = dp(20).toFloat()
+        })
+        dlg.show()
+        dlg.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.94f).toInt(),
+            (resources.displayMetrics.heightPixels * 0.9f).toInt()
+        )
     }
 
     private fun styleSwitch(sw: Switch) {
@@ -1125,6 +1233,13 @@ class MainActivity : Activity() {
                 " - " + timeText(rs.endMin / 60, rs.endMin % 60) +
                 (if (rn != null) "\nNext: " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(rn)) else "")
         }
+
+        statIstBig.text = ReminderStats.today(this, ReminderScheduler.TYPE_ISTIGFAR).toString()
+        statIstSmall.text = "Month " + ReminderStats.month(this, ReminderScheduler.TYPE_ISTIGFAR) +
+            "   -   All time " + ReminderStats.total(this, ReminderScheduler.TYPE_ISTIGFAR)
+        statDurBig.text = ReminderStats.today(this, ReminderScheduler.TYPE_DURUD).toString()
+        statDurSmall.text = "Month " + ReminderStats.month(this, ReminderScheduler.TYPE_DURUD) +
+            "   -   All time " + ReminderStats.total(this, ReminderScheduler.TYPE_DURUD)
 
         val guard = if (PowerGuardService.isEnabled(this)) "ON" else "OFF"
         val last = getSharedPreferences("power_guard", Context.MODE_PRIVATE)

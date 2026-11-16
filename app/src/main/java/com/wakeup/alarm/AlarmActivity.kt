@@ -9,7 +9,6 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -78,7 +77,6 @@ class AlarmActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setBackgroundColor(brown)
             setPadding(dp(24), dp(56), dp(24), dp(40))
         }
         root.addView(TextView(this).apply {
@@ -87,6 +85,7 @@ class AlarmActivity : Activity() {
             setTextColor(glowGold)
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
+            Glow.textGlow(this, dp(14).toFloat())
         })
         root.addView(TextClock(this).apply {
             format12Hour = "h:mm a"
@@ -96,6 +95,7 @@ class AlarmActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
             setPadding(0, dp(16), 0, 0)
+            Glow.textGlow(this, dp(12).toFloat())
         })
         root.addView(spacer())
         root.addView(Button(this).apply {
@@ -105,13 +105,12 @@ class AlarmActivity : Activity() {
             setTextColor(brown)
             setTypeface(typeface, Typeface.BOLD)
             stateListAnimator = null
-            background = GradientDrawable().apply {
-                setColor(glowGold)
-                cornerRadius = dp(28).toFloat()
-            }
+            background = Glow.goldFill(dp(28).toFloat())
+            Glow.shadowGlow(this, dp(12).toFloat())
+            Glow.pulse(this, dp(2).toFloat(), dp(18).toFloat())
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(150)
-            )
+            ).apply { setMargins(dp(8), 0, dp(8), 0) }
             setOnClickListener { startTask() }
         })
         root.addView(TextView(this).apply {
@@ -122,7 +121,7 @@ class AlarmActivity : Activity() {
             setPadding(0, dp(14), 0, 0)
         })
         root.addView(spacer())
-        setContentView(root)
+        setContentView(Glow.screen(this, root))
     }
 
     private fun spacer(): View = View(this).apply {
@@ -145,7 +144,7 @@ class AlarmActivity : Activity() {
     private fun buildNumberGame() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(brown)
+            background = Glow.background(context)
             setPadding(dp(12), dp(24), dp(12), dp(12))
         }
 
@@ -305,6 +304,8 @@ class AlarmActivity : Activity() {
         AlarmService.isRinging = false
         stopService(Intent(this, AlarmService::class.java))
         leaveLockTask()
+        // About 10 minutes from now a short wake-up check will open.
+        WakeCheck.afterTaskFinished(this)
         showDhikr()
     }
 
@@ -314,7 +315,6 @@ class AlarmActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(brown)
             setPadding(dp(16), dp(28), dp(16), dp(16))
         }
         root.addView(TextView(this).apply {
@@ -324,6 +324,7 @@ class AlarmActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(8))
+            Glow.textGlow(this, dp(10).toFloat())
         })
 
         val texts = listOf(
@@ -336,23 +337,19 @@ class AlarmActivity : Activity() {
         val weights = listOf(1f, 1f, 1f, 2.4f)
         for (i in texts.indices) {
             val tv = TextView(this).apply {
-                text = texts[i]
                 setTextColor(brown)
                 setTypeface(typeface, Typeface.BOLD)
                 gravity = Gravity.CENTER
                 setPadding(dp(14), dp(8), dp(14), dp(8))
-                background = GradientDrawable().apply {
-                    setColor(paleGold)
-                    cornerRadius = dp(16).toFloat()
-                }
+                background = Glow.paleCard(dp(16).toFloat())
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, weights[i]
                 ).apply { setMargins(0, dp(6), 0, dp(6)) }
             }
-            // The text shrinks or grows to fit its box, so nothing ever needs scrolling.
-            tv.setAutoSizeTextTypeUniformWithConfiguration(
-                14, if (i < 3) 40 else 26, 1, TypedValue.COMPLEX_UNIT_SP
-            )
+            // The text shrinks or grows to fit its box (lines break only between words),
+            // so nothing ever needs scrolling.
+            Glow.shadowGlow(tv, dp(4).toFloat())
+            TextFit.apply(tv, texts[i], 12f, if (i < 3) 40f else 26f)
             root.addView(tv)
         }
 
@@ -363,16 +360,14 @@ class AlarmActivity : Activity() {
             setTextColor(brown)
             setTypeface(typeface, Typeface.BOLD)
             stateListAnimator = null
-            background = GradientDrawable().apply {
-                setColor(glowGold)
-                cornerRadius = dp(18).toFloat()
-            }
+            background = Glow.goldFill(dp(18).toFloat())
+            Glow.shadowGlow(this, dp(8).toFloat())
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(60)
             ).apply { setMargins(0, dp(10), 0, 0) }
             setOnClickListener { finish() }
         })
-        setContentView(root)
+        setContentView(Glow.screen(this, root))
     }
 
     // ------------------------------------------------------------------

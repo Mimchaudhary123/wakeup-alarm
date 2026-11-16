@@ -8,6 +8,9 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.os.VibrationEffect
+import android.os.Vibrator
 import java.util.Calendar
 
 /** startMin / endMin are minutes after midnight. endMin 0 means 12:00 AM (midnight). */
@@ -119,8 +122,26 @@ object ReminderScheduler {
         return t
     }
 
+    @Suppress("DEPRECATION")
+    private fun buzz(c: Context) {
+        try {
+            val v = c.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            val effect = VibrationEffect.createWaveform(
+                longArrayOf(0, 500, 200, 500, 200, 500), intArrayOf(0, 255, 0, 255, 0, 255), -1
+            )
+            v.vibrate(effect, attrs)
+        } catch (e: Exception) {
+        }
+    }
+
     /** Opens the reminder screen. A notification is posted too, as a backup. */
     fun show(c: Context, type: Int) {
+        // Three firm pulses, so a reminder is felt even with the phone in a pocket.
+        buzz(c)
         if (ReminderActivity.showing) return
         val intent = Intent(c, ReminderActivity::class.java)
             .putExtra(EXTRA_TYPE, type)
