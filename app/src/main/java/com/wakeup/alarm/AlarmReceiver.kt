@@ -24,7 +24,7 @@ class AlarmReceiver : BroadcastReceiver() {
         WakeCheck.markRing(
             context,
             when {
-                id > 0 -> WakeCheck.MODE_REAL
+                id > 0 -> if (AlarmScheduler.get(context, id)?.check == true) WakeCheck.MODE_REAL else 0
                 id == AlarmScheduler.TEST_CHECK_ID -> WakeCheck.MODE_FAST
                 else -> 0
             }

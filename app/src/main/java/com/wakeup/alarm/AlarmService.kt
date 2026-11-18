@@ -221,26 +221,9 @@ class AlarmService : Service() {
         }
     }
 
-    /** Strong vibration that starts at once and repeats until the alarm is stopped. */
-    @Suppress("DEPRECATION")
+    /** Intense zigzag vibration that starts at once and repeats until the alarm is stopped. */
     private fun startVibration() {
-        try {
-            val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            vibrator = v
-            val timings = longArrayOf(0, 1000, 300)
-            val amplitudes = intArrayOf(0, 255, 0)
-            val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-            val effect = try {
-                VibrationEffect.createWaveform(timings, amplitudes, 0)
-            } catch (ex: Exception) {
-                VibrationEffect.createWaveform(timings, 0)
-            }
-            v.vibrate(effect, attrs)
-        } catch (e: Exception) {
-        }
+        Haptics.startZigzag(this)
     }
 
     private fun enforceVolume() {
@@ -287,11 +270,7 @@ class AlarmService : Service() {
         }
         player?.release()
         player = null
-        try {
-            vibrator?.cancel()
-        } catch (e: Exception) {
-        }
-        vibrator = null
+        Haptics.stop(this)
         try {
             enhancer?.release()
         } catch (e: Exception) {

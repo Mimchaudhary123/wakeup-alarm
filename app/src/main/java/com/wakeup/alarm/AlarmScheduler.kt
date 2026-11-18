@@ -22,7 +22,8 @@ data class AlarmItem(
     val year: Int,
     val month: Int,
     val day: Int,
-    val label: String
+    val label: String,
+    val check: Boolean = false   // true = the wake-up check and recheck follow this alarm
 )
 
 object AlarmScheduler {
@@ -73,7 +74,8 @@ object AlarmScheduler {
                         year = o.optInt("year", 2000),
                         month = o.optInt("month", 0),
                         day = o.optInt("day", 1),
-                        label = o.optString("label", "")
+                        label = o.optString("label", ""),
+                        check = o.optBoolean("check", false)
                     )
                 )
             }
@@ -96,6 +98,7 @@ object AlarmScheduler {
                     .put("month", a.month)
                     .put("day", a.day)
                     .put("label", a.label)
+                    .put("check", a.check)
             )
         }
         prefs(c).edit().putString(KEY_ALARMS, arr.toString()).apply()

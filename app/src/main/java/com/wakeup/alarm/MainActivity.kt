@@ -16,6 +16,8 @@ import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
@@ -248,6 +250,10 @@ class MainActivity : Activity() {
         body.addView(styledButton("Test: ring in 10 seconds", Color.TRANSPARENT, paleGold, paleGold) {
             AlarmScheduler.scheduleTest(this, 10_000)
             Toast.makeText(this, "The test alarm will ring in 10 seconds.", Toast.LENGTH_SHORT).show()
+        })
+        body.addView(styledButton("Test the vibration (5 seconds)", Color.TRANSPARENT, paleGold, paleGold) {
+            Haptics.startZigzag(this)
+            Handler(Looper.getMainLooper()).postDelayed({ Haptics.stop(this) }, 5000)
         })
         body.addView(styledButton("Test the wake-up check", Color.TRANSPARENT, paleGold, paleGold) {
             AlarmScheduler.scheduleTestWithCheck(this, 10_000)
@@ -507,7 +513,8 @@ class MainActivity : Activity() {
             setTextColor(if (a.enabled) brown else softBrown)
             setTypeface(typeface, Typeface.BOLD)
         })
-        val sub = if (a.label.isEmpty()) repeatText(a) else a.label + "  \u2022  " + repeatText(a)
+        val base = if (a.label.isEmpty()) repeatText(a) else a.label + "  \u2022  " + repeatText(a)
+        val sub = if (a.check) base + "  \u2022  Check" else base
         info.addView(TextView(this).apply {
             text = sub
             textSize = 14f
@@ -556,6 +563,8 @@ class MainActivity : Activity() {
         val storedDate = existing?.takeIf { it.days == 0 }
         var repeatMode = existing == null || existing.days != 0
         var mask = existing?.days ?: 0
+        // New alarms start with the wake-up check ON; alarms that existed before start with it OFF.
+        var checkOn = existing?.check ?: true
         var yy = storedDate?.year ?: now.get(Calendar.YEAR)
         var mm = storedDate?.month ?: now.get(Calendar.MONTH)
         var dd = storedDate?.day ?: now.get(Calendar.DAY_OF_MONTH)
@@ -696,6 +705,35 @@ class MainActivity : Activity() {
         }
         content.addView(labelEdit)
 
+        // ---- wake-up check and recheck for this alarm ----
+        val checkRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        val checkInfo = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, wrapContent, 1f)
+        }
+        checkInfo.addView(TextView(this).apply {
+            text = "Wake-up check and recheck"
+            textSize = 16f
+            setTextColor(brown)
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        checkInfo.addView(TextView(this).apply {
+            text = "A short check comes 1 and 10 minutes after you finish the task."
+            textSize = 12f
+            setTextColor(softBrown)
+        })
+        checkRow.addView(checkInfo)
+        val checkSwitch = Switch(this)
+        styleSwitch(checkSwitch)
+        checkSwitch.isChecked = checkOn
+        checkSwitch.setOnCheckedChangeListener { _, on -> checkOn = on }
+        checkRow.addView(checkSwitch)
+        content.addView(checkRow)
+
         fun trySave() {
             val h = picker.hour
             val mi = picker.minute
@@ -720,7 +758,8 @@ class MainActivity : Activity() {
                 id = existing?.id ?: AlarmScheduler.newId(this),
                 hour = h, minute = mi, enabled = true, days = days,
                 year = y, month = mo, day = da,
-                label = labelEdit.text.toString().trim()
+                label = labelEdit.text.toString().trim(),
+                check = checkOn
             )
             val next = AlarmScheduler.nextTrigger(item)
             if (next == null) {
@@ -1244,7 +1283,9 @@ class MainActivity : Activity() {
         val guard = if (PowerGuardService.isEnabled(this)) "ON" else "OFF"
         val last = getSharedPreferences("power_guard", Context.MODE_PRIVATE)
             .getString("guard_last", "none yet")
-        diagText.text = "Power guard: $guard\nLast other window seen while ringing:\n$last"
+        val strength = if (Haptics.hasAmplitudeControl(this)) "yes" else "no"
+        diagText.text = "Power guard: $guard\nVibration strength control: $strength" +
+            "\nLast other window seen while ringing:\n$last"
     }
 
     companion object {

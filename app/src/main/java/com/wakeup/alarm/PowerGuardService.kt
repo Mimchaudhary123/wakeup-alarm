@@ -55,7 +55,7 @@ class PowerGuardService : AccessibilityService() {
     private val tick = object : Runnable {
         override fun run() {
             if (!backActive) return
-            if (!AlarmService.isRinging) {
+            if (!protectionOn()) {
                 backActive = false
                 removeBlockerNow()
                 return
@@ -74,7 +74,7 @@ class PowerGuardService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-        if (!AlarmService.isRinging) return
+        if (!protectionOn()) return
 
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName) return // our own alarm screen / blocker is fine
@@ -154,12 +154,22 @@ class PowerGuardService : AccessibilityService() {
         }
     }
 
+    /** The guard works while an alarm rings AND while a wake-up check is open. */
+    private fun protectionOn(): Boolean = AlarmService.isRinging || WakeCheckActivity.showing
+
     private fun bringAlarmBack() {
         try {
-            startActivity(
-                Intent(this, AlarmActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            )
+            if (AlarmService.isRinging) {
+                startActivity(
+                    Intent(this, AlarmActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                )
+            } else if (WakeCheckActivity.showing) {
+                startActivity(
+                    Intent(this, WakeCheckActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                )
+            }
         } catch (e: Exception) {
         }
     }

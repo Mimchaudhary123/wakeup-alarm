@@ -8,9 +8,6 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.os.VibrationEffect
-import android.os.Vibrator
 
 /**
  * The wake-up checks. After the alarm task is finished, a first check opens after 1 minute
@@ -86,6 +83,7 @@ object WakeCheck {
         if (s.getLong(KEY_DEADLINE_AT, 0L) == 0L) return // the check was finished in time
         s.edit().putLong(KEY_DEADLINE_AT, 0L).apply()
         cancelNotification(c)
+        Haptics.stop(c)
         try {
             c.startForegroundService(Intent(c, AlarmService::class.java))
         } catch (e: Exception) {
@@ -101,6 +99,7 @@ object WakeCheck {
             val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             am.cancel(pending(c, PHASE_DEADLINE))
             cancelNotification(c)
+            Haptics.stop(c)
             if (stage == 1 && mode != 0) {
                 val now = System.currentTimeMillis()
                 val finishAt = s.getLong(KEY_FINISH_AT, now)
@@ -170,23 +169,10 @@ object WakeCheck {
         }
     }
 
-    /** Strong vibration, a backup notification and the check screen itself. */
-    @Suppress("DEPRECATION")
+    /** Zigzag vibration, a backup notification and the check screen itself. */
     private fun show(c: Context) {
-        try {
-            val v = c.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-            v.vibrate(
-                VibrationEffect.createWaveform(
-                    longArrayOf(0, 800, 300, 800, 300, 800), intArrayOf(0, 255, 0, 255, 0, 255), -1
-                ),
-                attrs
-            )
-        } catch (e: Exception) {
-        }
+        // Intense zigzag vibration, until the check is finished or the time runs out.
+        Haptics.startZigzag(c)
         val intent = Intent(c, WakeCheckActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

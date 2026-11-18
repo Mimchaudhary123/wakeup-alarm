@@ -8,9 +8,6 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.os.VibrationEffect
-import android.os.Vibrator
 import java.util.Calendar
 
 /** startMin / endMin are minutes after midnight. endMin 0 means 12:00 AM (midnight). */
@@ -31,7 +28,7 @@ object ReminderScheduler {
     private const val KEY_ON = "on"
     private const val KEY_START = "start_min"
     private const val KEY_END = "end_min"
-    private const val KEY_EVERY = "every_min"
+    private const val KEY_EVERY = "every_min_v2"
     private const val KEY_LAST_TYPE = "last_type"
     private const val CHANNEL = "akhirah_reminders"
     private const val REQUEST_FIRE = 4242
@@ -45,7 +42,7 @@ object ReminderScheduler {
             on = p.getBoolean(KEY_ON, true),
             startMin = p.getInt(KEY_START, 6 * 60),   // 6:00 AM
             endMin = p.getInt(KEY_END, 0),            // 12:00 AM
-            everyMin = p.getInt(KEY_EVERY, 60)        // every hour
+            everyMin = p.getInt(KEY_EVERY, 30)        // every 30 minutes: one Istigfar and one Durud per hour
         )
     }
 
@@ -114,7 +111,21 @@ object ReminderScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-    /** Istigfar and Durud take turns. */
+    /**
+     * Which reminder belongs to the time slot that is firing now: slots alternate, counted from the
+     * start time. With the default 30 minutes that is Istigfar on the hour and Durud on the half hour.
+     */
+    fun typeForNow(c: Context): Int {
+        val s = settings(c)
+        val every = maxOf(5, s.everyMin)
+        val cal = Calendar.getInstance()
+        val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        val rel = (minuteOfDay - s.startMin + 1440) % 1440
+        val index = (rel + every / 2) / every
+        return if (index % 2 == 0) TYPE_ISTIGFAR else TYPE_DURUD
+    }
+
+    /** Istigfar and Durud take turns (used by the preview button). */
     fun nextType(c: Context): Int {
         val p = prefs(c)
         val t = 1 - p.getInt(KEY_LAST_TYPE, TYPE_DURUD)
@@ -122,26 +133,10 @@ object ReminderScheduler {
         return t
     }
 
-    @Suppress("DEPRECATION")
-    private fun buzz(c: Context) {
-        try {
-            val v = c.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-            val effect = VibrationEffect.createWaveform(
-                longArrayOf(0, 500, 200, 500, 200, 500), intArrayOf(0, 255, 0, 255, 0, 255), -1
-            )
-            v.vibrate(effect, attrs)
-        } catch (e: Exception) {
-        }
-    }
-
     /** Opens the reminder screen. A notification is posted too, as a backup. */
     fun show(c: Context, type: Int) {
         // Three firm pulses, so a reminder is felt even with the phone in a pocket.
-        buzz(c)
+        Haptics.burst(c)
         if (ReminderActivity.showing) return
         val intent = Intent(c, ReminderActivity::class.java)
             .putExtra(EXTRA_TYPE, type)
@@ -184,6 +179,6 @@ class ReminderReceiver : BroadcastReceiver() {
         if (!ReminderScheduler.settings(context).on) return
         // Never disturb a ringing alarm.
         if (AlarmService.isRinging) return
-        ReminderScheduler.show(context, ReminderScheduler.nextType(context))
+        ReminderScheduler.show(context, ReminderScheduler.typeForNow(context))
     }
 }

@@ -1,8 +1,10 @@
 package com.wakeup.alarm
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -11,7 +13,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
@@ -21,7 +25,7 @@ import android.widget.Toast
 /** "Are you awake?": 3 quick rounds of the number game before the countdown runs out. */
 class WakeCheckActivity : Activity() {
 
-    private val rounds = 5
+    private val rounds = 3
     private var stage = 1
     private val brown = Color.parseColor("#603E1E")
     private var round = 1
@@ -32,14 +36,32 @@ class WakeCheckActivity : Activity() {
     private lateinit var infoView: TextView
     private lateinit var leftView: TextView
     private var d = 1f
+    private var foreground = false
+    private var createdAt = 0L
 
     private val ticker = object : Runnable {
         override fun run() {
             val left = deadlineAt - System.currentTimeMillis()
+            // Let go of the screen pin just before time runs out, so the alarm screen can come up.
+            if (left <= 1000) leaveLockTask()
             // The alarm is ringing again (time ran out): this screen is no longer needed.
             if (AlarmService.isRinging || left <= 0) {
+                leaveLockTask()
                 finish()
                 return
+            }
+            // Left with Home or similar: bring the check back to the front.
+            if (!foreground && System.currentTimeMillis() - createdAt > 2500 &&
+                Settings.canDrawOverlays(this@WakeCheckActivity)
+            ) {
+                try {
+                    startActivity(
+                        Intent(this@WakeCheckActivity, WakeCheckActivity::class.java).addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        )
+                    )
+                } catch (e: Exception) {
+                }
             }
             showInfo(left)
             handler.postDelayed(this, 500)
@@ -70,6 +92,7 @@ class WakeCheckActivity : Activity() {
             finish() // nothing to check any more
             return
         }
+        createdAt = System.currentTimeMillis()
         d = resources.displayMetrics.density
         stage = WakeCheck.stage(this)
         buildScreen()
@@ -178,6 +201,7 @@ class WakeCheckActivity : Activity() {
         if (n == target) {
             if (round >= rounds) {
                 WakeCheck.passed(this)
+                leaveLockTask()
                 val msg = if (stage < WakeCheck.CHECKS) "Good. One more check comes later." else "Good. You are awake."
                 Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
                 finish()
@@ -192,6 +216,43 @@ class WakeCheckActivity : Activity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        foreground = true
+        enterLockTask()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        foreground = false
+    }
+
+    /** Screen pinning, like the alarm screen: blocks Home, Recents and the notification shade. */
+    private fun enterLockTask() {
+        try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            if (am.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) startLockTask()
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun leaveLockTask() {
+        try {
+            stopLockTask()
+        } catch (e: Exception) {
+        }
+    }
+
+    /** The volume keys do nothing during the check. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP,
+            KeyEvent.KEYCODE_VOLUME_DOWN,
+            KeyEvent.KEYCODE_VOLUME_MUTE -> return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     /** Back does nothing during the check. */
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
@@ -200,6 +261,9 @@ class WakeCheckActivity : Activity() {
     override fun onDestroy() {
         showing = false
         handler.removeCallbacks(ticker)
+        leaveLockTask()
+        // Stop the check vibration, unless the alarm has taken over and is vibrating itself.
+        if (!AlarmService.isRinging) Haptics.stop(this)
         super.onDestroy()
     }
 
