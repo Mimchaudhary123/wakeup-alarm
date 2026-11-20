@@ -6,6 +6,20 @@ import android.content.Intent
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // Updating the app cancels its system alarms, so any "waiting" state is now meaningless.
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            WakeCheck.clearState(context, "app updated")
+            try {
+                context.createDeviceProtectedStorageContext()
+                    .getSharedPreferences(AlarmService.STATE_PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .remove(AlarmService.KEY_RINGING_BEAT)
+                    .remove(AlarmService.KEY_OLD_RINGING_SINCE)
+                    .apply()
+            } catch (e: Exception) {
+            }
+        }
+
         // After reboot, app update, or time/timezone change: set everything up again.
         AlarmScheduler.scheduleAll(context)
         ReminderScheduler.scheduleNext(context)
@@ -14,7 +28,8 @@ class BootReceiver : BroadcastReceiver() {
         PermissionGate.watch(context)
         PermissionGate.scheduleWatch(context, 60_000L)
 
-        // Backup for LockedBootReceiver: an alarm that was ringing when the phone restarted rings again.
+        // Backup for LockedBootReceiver. It only acts on state written before this boot,
+        // so it can never start an alarm because of something that just happened.
         if (intent.action == Intent.ACTION_BOOT_COMPLETED && !AlarmService.isRinging) {
             LockedBootReceiver.resumeAlarmIfNeeded(context)
         }

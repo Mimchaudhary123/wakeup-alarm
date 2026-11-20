@@ -7,6 +7,13 @@ import android.content.Intent
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, -1)
+        val planned = intent.getLongExtra(AlarmScheduler.EXTRA_TRIGGER_AT, 0L)
+        val now = System.currentTimeMillis()
+        AppLog.add(
+            context,
+            "alarm " + (if (id > 0) "#$id" else if (id == 0) "test" else "old") + " fired" +
+                (if (planned > 0L) ", planned " + AppLog.time(planned) + ", late by " + (now - planned) / 1000 + " s" else "")
+        )
         if (id > 0) {
             // A normal alarm: ignore it if it was deleted or switched off meanwhile.
             val alarm = AlarmScheduler.get(context, id) ?: return

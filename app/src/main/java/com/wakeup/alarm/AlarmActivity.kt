@@ -33,6 +33,7 @@ class AlarmActivity : Activity() {
     private val optionCount = 4
 
     private var stage = STAGE_LANDING
+    private var shownLogged = false
     private var round = 1
     private var target = ""
 
@@ -379,6 +380,10 @@ class AlarmActivity : Activity() {
         if (AlarmService.isRinging) {
             // A new alarm started while an old dhikr screen was still open: start over.
             if (stage == STAGE_DHIKR) showLanding()
+            if (!shownLogged) {
+                shownLogged = true
+                AppLog.add(this, "alarm screen shown")
+            }
             isForeground = true
             enterLockTask()
             return

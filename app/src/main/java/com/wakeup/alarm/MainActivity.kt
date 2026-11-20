@@ -769,6 +769,10 @@ class MainActivity : Activity() {
             }
             AlarmScheduler.upsert(this, item)
             AlarmScheduler.scheduleOne(this, item)
+            AppLog.add(
+                this,
+                "alarm saved: rings " + SimpleDateFormat("EEE d MMM HH:mm", Locale.getDefault()).format(Date(next))
+            )
             dlg.dismiss()
             refreshAll()
             Toast.makeText(this, "Alarm set, rings " + untilText(next), Toast.LENGTH_SHORT).show()
@@ -1285,6 +1289,7 @@ class MainActivity : Activity() {
             .getString("guard_last", "none yet")
         val strength = if (Haptics.hasAmplitudeControl(this)) "yes" else "no"
         diagText.text = "Power guard: $guard\nVibration strength control: $strength" +
+            "\nLog (alarm, sound, checks):\n" + AppLog.text(this) +
             "\nLast other window seen while ringing:\n$last"
     }
 

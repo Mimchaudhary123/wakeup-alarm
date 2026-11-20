@@ -23,7 +23,7 @@ data class AlarmItem(
     val month: Int,
     val day: Int,
     val label: String,
-    val check: Boolean = false   // true = the wake-up check and recheck follow this alarm
+    val check: Boolean = true    // true = the wake-up check and recheck follow this alarm
 )
 
 object AlarmScheduler {
@@ -37,6 +37,7 @@ object AlarmScheduler {
     private const val OLD_ENABLED = "enabled"
 
     const val EXTRA_ALARM_ID = "alarm_id"
+    const val EXTRA_TRIGGER_AT = "trigger_at"
     const val TEST_ID = 0
     const val TEST_CHECK_ID = -2
     private const val TEST_REQUEST = 999999
@@ -75,7 +76,7 @@ object AlarmScheduler {
                         month = o.optInt("month", 0),
                         day = o.optInt("day", 1),
                         label = o.optString("label", ""),
-                        check = o.optBoolean("check", false)
+                        check = o.optBoolean("check", true)
                     )
                 )
             }
@@ -233,7 +234,7 @@ object AlarmScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         // setAlarmClock is exact, survives Doze, and needs no special permission.
-        am.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, showIntent), firePendingIntent(c, id))
+        am.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, showIntent), firePendingIntent(c, id, triggerAt))
     }
 
     private fun cancel(c: Context, id: Int) {
@@ -241,8 +242,10 @@ object AlarmScheduler {
         am.cancel(firePendingIntent(c, id))
     }
 
-    private fun firePendingIntent(c: Context, id: Int): PendingIntent {
-        val intent = Intent(c, AlarmReceiver::class.java).putExtra(EXTRA_ALARM_ID, id)
+    private fun firePendingIntent(c: Context, id: Int, triggerAt: Long = 0L): PendingIntent {
+        val intent = Intent(c, AlarmReceiver::class.java)
+            .putExtra(EXTRA_ALARM_ID, id)
+            .putExtra(EXTRA_TRIGGER_AT, triggerAt)
         val request = when (id) {
             TEST_ID -> TEST_REQUEST
             TEST_CHECK_ID -> TEST_CHECK_REQUEST

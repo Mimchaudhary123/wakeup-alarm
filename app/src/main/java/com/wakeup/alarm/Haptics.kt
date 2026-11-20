@@ -7,13 +7,14 @@ import android.os.Vibrator
 
 /** All vibration of the app in one place. Uses the alarm channel, so it also works in silent mode. */
 object Haptics {
-    // Zigzag: hard strokes at full strength, a lighter stroke in between, very short gaps.
-    // Without strength control the same rhythm still buzzes hard.
-    private val ZIGZAG_TIMINGS = longArrayOf(0, 220, 40, 120, 40, 220, 40, 120, 40, 380, 100)
-    private val ZIGZAG_AMPLITUDES = intArrayOf(0, 255, 0, 150, 0, 255, 0, 150, 0, 255, 0)
+    // This phone's motor has NO strength control, so strength cannot change; only the timing can.
+    // A motor of this kind needs time to spin up, so short pulses feel weak. The pulses here are
+    // LONG, with only short gaps: long - short - long - medium, a zigzag in rhythm.
+    private val ZIGZAG_TIMINGS = longArrayOf(0, 1200, 120, 450, 120, 1200, 120, 700, 150)
+    private val ZIGZAG_AMPLITUDES = intArrayOf(0, 255, 0, 255, 0, 255, 0, 255, 0)
 
     // Reminder: a notification-style burst, felt once.
-    private val BURST_TIMINGS = longArrayOf(0, 300, 120, 300, 120, 600)
+    private val BURST_TIMINGS = longArrayOf(0, 700, 200, 700, 200, 700)
     private val BURST_AMPLITUDES = intArrayOf(0, 255, 0, 255, 0, 255)
 
     @Suppress("DEPRECATION")
@@ -54,8 +55,13 @@ object Haptics {
     private fun play(c: Context, timings: LongArray, amplitudes: IntArray, repeat: Int) {
         try {
             val v = vibrator(c) ?: return
+            // Without strength control the plain on/off pattern is used.
             val effect = try {
-                VibrationEffect.createWaveform(timings, amplitudes, repeat)
+                if (v.hasAmplitudeControl()) {
+                    VibrationEffect.createWaveform(timings, amplitudes, repeat)
+                } else {
+                    VibrationEffect.createWaveform(timings, repeat)
+                }
             } catch (e: Exception) {
                 VibrationEffect.createWaveform(timings, repeat)
             }

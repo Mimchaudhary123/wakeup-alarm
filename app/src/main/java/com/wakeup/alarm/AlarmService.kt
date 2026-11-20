@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.database.ContentObserver
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -36,9 +37,14 @@ class AlarmService : Service() {
     private var vibrator: Vibrator? = null
 
     // Backup watchdog: re-checks the alarm volume 5 times per second.
+    private var watchTicks = 0
+    private var soundRetryLogged = false
+
     private val volumeWatchdog = object : Runnable {
         override fun run() {
             enforceVolume()
+            watchTicks++
+            if (watchTicks % 10 == 0) ensureSound() // every 2 seconds
             handler.postDelayed(this, 200)
         }
     }
@@ -69,17 +75,28 @@ class AlarmService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            try {
+                stateStore().edit().putLong(KEY_RINGING_BEAT, System.currentTimeMillis()).apply()
+            } catch (e: Exception) {
+            }
+            handler.postDelayed(this, 10_000)
+        }
+    }
+
     /** Storage that works even before the phone is unlocked after a restart. */
     private fun stateStore() =
         createDeviceProtectedStorageContext().getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isRinging = true
-        // Remember that an alarm is ringing, so it can start again if the phone restarts.
-        try {
-            stateStore().edit().putLong(KEY_RINGING_SINCE, System.currentTimeMillis()).apply()
-        } catch (e: Exception) {
-        }
+        soundRetryLogged = false
+        AppLog.add(this, "alarm service started")
+        // Heartbeat: while the alarm rings, the time is written every 10 seconds. Only if the phone
+        // goes down while this heartbeat is fresh can the alarm start again after the restart.
+        handler.removeCallbacks(heartbeat)
+        handler.post(heartbeat)
 
         val alarmIntent = Intent(this, AlarmActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -144,6 +161,7 @@ class AlarmService : Service() {
         try {
             val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            val speaker = builtInSpeaker()
             player = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -152,14 +170,77 @@ class AlarmService : Service() {
                         .build()
                 )
                 setDataSource(this@AlarmService, uri)
+                // Always the phone's own speaker, never Bluetooth earbuds lying somewhere unheard.
+                if (speaker != null) setPreferredDevice(speaker)
                 isLooping = true
                 setVolume(1.0f, 1.0f)
                 prepare()
                 start()
             }
             setupBoost()
+            AppLog.add(
+                this,
+                "sound playing (alarm tone), phone speaker forced: " + (speaker != null) +
+                    ", outputs: " + outputsText()
+            )
         } catch (e: Exception) {
+            AppLog.add(this, "alarm tone failed (" + e.javaClass.simpleName + "), using a backup sound")
             startSoundFromFile()
+        }
+    }
+
+    /** The phone's own speaker, if there is one. */
+    private fun builtInSpeaker(): AudioDeviceInfo? =
+        try {
+            (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+        } catch (e: Exception) {
+            null
+        }
+
+    /** Which audio outputs are connected right now (for the log). */
+    private fun outputsText(): String =
+        try {
+            (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .joinToString(", ") {
+                    when (it.type) {
+                        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "speaker"
+                        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "earpiece"
+                        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "BLUETOOTH"
+                        AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "wired headset"
+                        else -> "type " + it.type
+                    }
+                }
+        } catch (e: Exception) {
+            "unknown"
+        }
+
+    /** Every 2 seconds: if the sound stopped for any reason, start it again. */
+    private fun ensureSound() {
+        try {
+            val p = player
+            if (p != null && p.isPlaying) return
+            if (!soundRetryLogged) {
+                soundRetryLogged = true
+                AppLog.add(this, "the sound was not playing: starting it again")
+            }
+            try {
+                p?.release()
+            } catch (e: Exception) {
+            }
+            player = null
+            try {
+                enhancer?.release()
+            } catch (e: Exception) {
+            }
+            enhancer = null
+            enhancerOn = false
+            startSound()
+        } catch (e: Exception) {
         }
     }
 
@@ -180,6 +261,7 @@ class AlarmService : Service() {
         try {
             if (player != null) return
             val path = systemSoundPath() ?: return
+            val speaker = builtInSpeaker()
             player = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -188,13 +270,16 @@ class AlarmService : Service() {
                         .build()
                 )
                 setDataSource(path)
+                if (speaker != null) setPreferredDevice(speaker)
                 isLooping = true
                 setVolume(1.0f, 1.0f)
                 prepare()
                 start()
             }
             setupBoost()
+            AppLog.add(this, "sound playing (backup sound file), outputs: " + outputsText())
         } catch (e: Exception) {
+            AppLog.add(this, "backup sound failed too (" + e.javaClass.simpleName + ")")
         }
     }
 
@@ -252,8 +337,9 @@ class AlarmService : Service() {
     override fun onDestroy() {
         isRinging = false
         // The alarm was stopped on purpose (task done): forget it.
+        handler.removeCallbacks(heartbeat)
         try {
-            stateStore().edit().remove(KEY_RINGING_SINCE).apply()
+            stateStore().edit().remove(KEY_RINGING_BEAT).apply()
         } catch (e: Exception) {
         }
         quietUntil = 0L
@@ -283,7 +369,8 @@ class AlarmService : Service() {
 
     companion object {
         const val STATE_PREFS = "alarm_state"
-        const val KEY_RINGING_SINCE = "ringing_since"
+        const val KEY_RINGING_BEAT = "ringing_beat"
+        const val KEY_OLD_RINGING_SINCE = "ringing_since" // from older versions, only cleaned up
 
         private const val CHANNEL_ID = "wakeup_alarm"
         private const val NOTIF_ID = 1001

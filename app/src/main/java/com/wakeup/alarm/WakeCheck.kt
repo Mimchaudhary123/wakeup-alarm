@@ -21,6 +21,9 @@ object WakeCheck {
     const val CHECKS = 2
 
     private const val KEY_MODE = "wc_mode"
+    private const val KEY_UPDATED_AT = "wc_updated_at"   // when the waiting state was last written
+    private const val KEY_LOG = "wc_log"
+    private const val MAX_STATE_AGE_MS = 20 * 60 * 1000L
     private const val KEY_STAGE = "wc_stage"           // 1 = first check, 2 = second check
     private const val KEY_FINISH_AT = "wc_finish_at"   // when the alarm task was finished
     private const val KEY_CHECK_AT = "wc_check_at"
@@ -41,6 +44,25 @@ object WakeCheck {
     fun markRing(c: Context, mode: Int) {
         try {
             store(c).edit().putInt(KEY_MODE, mode).apply()
+            log(c, "ring started, checks: " + (if (mode == 0) "off" else if (mode == MODE_FAST) "fast test" else "on"))
+        } catch (e: Exception) {
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  A short log of what the checks did (shown under Diagnostics)
+    // ------------------------------------------------------------------
+
+    fun log(c: Context, msg: String) = AppLog.add(c, msg)
+
+    fun logText(c: Context): String = AppLog.text(c)
+
+    /** Forgets any waiting check (for example after the app was updated, which cancels the alarms). */
+    fun clearState(c: Context, why: String) {
+        try {
+            store(c).edit().putLong(KEY_CHECK_AT, 0L).putLong(KEY_DEADLINE_AT, 0L)
+                .putInt(KEY_MODE, 0).putInt(KEY_STAGE, 1).apply()
+            log(c, "checks cleared: $why")
         } catch (e: Exception) {
         }
     }
@@ -58,8 +80,10 @@ object WakeCheck {
             val now = System.currentTimeMillis()
             val at = now + firstDelay(mode)
             s.edit().putInt(KEY_STAGE, 1).putLong(KEY_FINISH_AT, now)
-                .putLong(KEY_CHECK_AT, at).putLong(KEY_DEADLINE_AT, 0L).apply()
+                .putLong(KEY_CHECK_AT, at).putLong(KEY_DEADLINE_AT, 0L)
+                .putLong(KEY_UPDATED_AT, now).apply()
             schedule(c, PHASE_CHECK, at)
+            log(c, "task finished: check 1 planned in " + (at - now) / 1000 + " s")
         } catch (e: Exception) {
         }
     }
@@ -67,13 +91,20 @@ object WakeCheck {
     /** The planned time has come: open the check and start the countdown. */
     fun onCheckTime(c: Context) {
         val s = store(c)
-        if (s.getLong(KEY_CHECK_AT, 0L) == 0L) return
+        if (s.getLong(KEY_CHECK_AT, 0L) == 0L) {
+            log(c, "check time came, but nothing was waiting")
+            return
+        }
         s.edit().putLong(KEY_CHECK_AT, 0L).apply()
         // An alarm is ringing right now, so the check is not needed.
-        if (AlarmService.isRinging) return
+        if (AlarmService.isRinging) {
+            log(c, "check skipped: an alarm is ringing")
+            return
+        }
         val deadline = System.currentTimeMillis() + grace(s.getInt(KEY_MODE, 0))
-        s.edit().putLong(KEY_DEADLINE_AT, deadline).apply()
+        s.edit().putLong(KEY_DEADLINE_AT, deadline).putLong(KEY_UPDATED_AT, System.currentTimeMillis()).apply()
         schedule(c, PHASE_DEADLINE, deadline)
+        log(c, "check " + s.getInt(KEY_STAGE, 1) + " opened, " + (grace(s.getInt(KEY_MODE, 0)) / 1000) + " s to finish it")
         show(c)
     }
 
@@ -81,6 +112,7 @@ object WakeCheck {
     fun onDeadline(c: Context) {
         val s = store(c)
         if (s.getLong(KEY_DEADLINE_AT, 0L) == 0L) return // the check was finished in time
+        log(c, "check not finished in time: the alarm rings again")
         s.edit().putLong(KEY_DEADLINE_AT, 0L).apply()
         cancelNotification(c)
         Haptics.stop(c)
@@ -105,12 +137,14 @@ object WakeCheck {
                 val finishAt = s.getLong(KEY_FINISH_AT, now)
                 val at = maxOf(finishAt + secondDelay(mode), now + 20_000L)
                 s.edit().putInt(KEY_STAGE, 2).putLong(KEY_DEADLINE_AT, 0L)
-                    .putLong(KEY_CHECK_AT, at).apply()
+                    .putLong(KEY_CHECK_AT, at).putLong(KEY_UPDATED_AT, now).apply()
                 schedule(c, PHASE_CHECK, at)
+                log(c, "check 1 passed: check 2 planned in " + (at - now) / 1000 + " s")
             } else {
                 s.edit().putLong(KEY_CHECK_AT, 0L).putLong(KEY_DEADLINE_AT, 0L)
                     .putInt(KEY_MODE, 0).putInt(KEY_STAGE, 1).apply()
                 am.cancel(pending(c, PHASE_CHECK))
+                log(c, "all checks passed")
             }
         } catch (e: Exception) {
         }
@@ -121,15 +155,26 @@ object WakeCheck {
     fun deadlineAt(c: Context): Long = store(c).getLong(KEY_DEADLINE_AT, 0L)
 
     /**
-     * After a restart: if a check was still waiting, the alarm rings again at once.
-     * (Restarting the phone must not be a way out of the check.) Returns true if it started.
+     * After a restart: if a check was waiting when the phone went down, the alarm rings again
+     * (restarting must not be a way out of the check). The waiting state only counts if it was
+     * written BEFORE this boot and less than 20 minutes before it. Anything newer (a check that
+     * was planned moments ago) or older (a leftover) is ignored and deleted.
      */
-    fun ringIfPending(c: Context): Boolean {
+    fun ringIfPending(c: Context, bootTime: Long): Boolean {
         return try {
             val s = store(c)
-            val pending = s.getLong(KEY_CHECK_AT, 0L) > 0L || s.getLong(KEY_DEADLINE_AT, 0L) > 0L
-            if (!pending) return false
+            val waiting = s.getLong(KEY_CHECK_AT, 0L) > 0L || s.getLong(KEY_DEADLINE_AT, 0L) > 0L
+            if (!waiting) return false
+            val written = s.getLong(KEY_UPDATED_AT, 0L)
+            if (written <= 0L || written >= bootTime) return false // from this boot: not a restart
+            val valid = bootTime - written < MAX_STATE_AGE_MS && s.getInt(KEY_MODE, 0) != 0
             s.edit().putLong(KEY_CHECK_AT, 0L).putLong(KEY_DEADLINE_AT, 0L).apply()
+            if (!valid) {
+                s.edit().putInt(KEY_MODE, 0).apply()
+                log(c, "old waiting check ignored")
+                return false
+            }
+            log(c, "restart during a check: the alarm rings again")
             c.startForegroundService(Intent(c, AlarmService::class.java))
             true
         } catch (e: Exception) {
