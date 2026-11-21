@@ -176,6 +176,7 @@ class ReminderActivity : Activity() {
 
     override fun onDestroy() {
         showing = false
+        DndGuard.endIfIdle(this)
         super.onDestroy()
     }
 

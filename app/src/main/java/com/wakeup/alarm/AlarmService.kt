@@ -45,6 +45,7 @@ class AlarmService : Service() {
             enforceVolume()
             watchTicks++
             if (watchTicks % 10 == 0) ensureSound() // every 2 seconds
+            if (watchTicks % 150 == 0) Haptics.startZigzag(this@AlarmService) // every 30 seconds, in case it was dropped
             handler.postDelayed(this, 200)
         }
     }
@@ -75,6 +76,13 @@ class AlarmService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    // Do Not Disturb needs a moment to switch off; vibrations started before that are dropped,
+    // so the vibration is started once more shortly after, and the state is written to the log.
+    private val vibrationRestart = Runnable { if (isRinging) Haptics.startZigzag(this) }
+    private val dndStateLog = Runnable {
+        AppLog.add(this, "after switching Do Not Disturb: " + DndGuard.describe(this).replace("\n", " | "))
+    }
+
     private val heartbeat = object : Runnable {
         override fun run() {
             try {
@@ -93,6 +101,10 @@ class AlarmService : Service() {
         isRinging = true
         soundRetryLogged = false
         AppLog.add(this, "alarm service started")
+        if (DndGuard.begin(this)) {
+            handler.postDelayed(vibrationRestart, 900)
+            handler.postDelayed(dndStateLog, 1800)
+        }
         // Heartbeat: while the alarm rings, the time is written every 10 seconds. Only if the phone
         // goes down while this heartbeat is fresh can the alarm start again after the restart.
         handler.removeCallbacks(heartbeat)
@@ -338,6 +350,10 @@ class AlarmService : Service() {
         isRinging = false
         // The alarm was stopped on purpose (task done): forget it.
         handler.removeCallbacks(heartbeat)
+        handler.removeCallbacks(vibrationRestart)
+        handler.removeCallbacks(dndStateLog)
+        // Put Do Not Disturb back, unless a wake-up check is open and still needs it off.
+        if (!WakeCheckActivity.showing) DndGuard.end(this)
         try {
             stateStore().edit().remove(KEY_RINGING_BEAT).apply()
         } catch (e: Exception) {

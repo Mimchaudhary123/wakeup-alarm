@@ -8,6 +8,8 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import java.util.Calendar
 
 /** startMin / endMin are minutes after midnight. endMin 0 means 12:00 AM (midnight). */
@@ -135,8 +137,15 @@ object ReminderScheduler {
 
     /** Opens the reminder screen. A notification is posted too, as a backup. */
     fun show(c: Context, type: Int) {
-        // Three firm pulses, so a reminder is felt even with the phone in a pocket.
+        // A firm burst, so a reminder is felt even with the phone in a pocket. Do Not Disturb would
+        // swallow it, so it is switched off for a moment (if the app may) and put back afterwards.
+        val switched = DndGuard.begin(c)
         Haptics.burst(c)
+        if (switched) {
+            val h = Handler(Looper.getMainLooper())
+            h.postDelayed({ Haptics.burst(c) }, 900)
+            h.postDelayed({ DndGuard.endIfIdle(c) }, 7000)
+        }
         if (ReminderActivity.showing) return
         val intent = Intent(c, ReminderActivity::class.java)
             .putExtra(EXTRA_TYPE, type)

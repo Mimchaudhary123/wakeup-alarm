@@ -252,8 +252,22 @@ class MainActivity : Activity() {
             Toast.makeText(this, "The test alarm will ring in 10 seconds.", Toast.LENGTH_SHORT).show()
         })
         body.addView(styledButton("Test the vibration (5 seconds)", Color.TRANSPARENT, paleGold, paleGold) {
-            Haptics.startZigzag(this)
-            Handler(Looper.getMainLooper()).postDelayed({ Haptics.stop(this) }, 5000)
+            val switched = DndGuard.begin(this)
+            val h = Handler(Looper.getMainLooper())
+            h.postDelayed({ Haptics.startZigzag(this) }, if (switched) 900L else 0L)
+            h.postDelayed({
+                Haptics.stop(this)
+                DndGuard.endIfIdle(this)
+            }, 6000)
+        })
+        body.addView(styledButton("Vibration lab (6 different ways)", Color.TRANSPARENT, paleGold, paleGold) {
+            Toast.makeText(
+                this,
+                "Hold the phone. 6 buzzes of 2 seconds each. Remember the numbers you feel.",
+                Toast.LENGTH_LONG
+            ).show()
+            DndGuard.begin(this)
+            Handler(Looper.getMainLooper()).postDelayed({ runVibrationLab(1) }, 2500)
         })
         body.addView(styledButton("Test the wake-up check", Color.TRANSPARENT, paleGold, paleGold) {
             AlarmScheduler.scheduleTestWithCheck(this, 10_000)
@@ -347,6 +361,7 @@ class MainActivity : Activity() {
         super.onResume()
         // Set everything up again, so nothing depends on the phone remembering it.
         PowerGuardService.ensureEnabled(this)
+        DndGuard.endIfIdle(this)
         AlarmScheduler.scheduleAll(this)
         ReminderScheduler.scheduleNext(this)
         PermissionGate.watch(this)
@@ -968,6 +983,18 @@ class MainActivity : Activity() {
         )
     }
 
+    private fun runVibrationLab(step: Int) {
+        if (step > Haptics.LAB_STEPS) {
+            Haptics.stop(this)
+            DndGuard.endIfIdle(this)
+            Toast.makeText(this, "Done. Tell me which numbers you felt.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val name = Haptics.lab(this, step)
+        Toast.makeText(this, "Now: $name", Toast.LENGTH_SHORT).show()
+        Handler(Looper.getMainLooper()).postDelayed({ runVibrationLab(step + 1) }, 3500)
+    }
+
     private fun styleSwitch(sw: Switch) {
         sw.thumbTintList = ColorStateList(
             arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
@@ -1289,6 +1316,7 @@ class MainActivity : Activity() {
             .getString("guard_last", "none yet")
         val strength = if (Haptics.hasAmplitudeControl(this)) "yes" else "no"
         diagText.text = "Power guard: $guard\nVibration strength control: $strength" +
+            "\n" + DndGuard.describe(this) +
             "\nLog (alarm, sound, checks):\n" + AppLog.text(this) +
             "\nLast other window seen while ringing:\n$last"
     }

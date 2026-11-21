@@ -44,6 +44,53 @@ object Haptics {
         }
     }
 
+    const val LAB_STEPS = 6
+
+    /** Vibration lab: the same 2 second buzz sent in different ways. Returns a name for the way. */
+    @Suppress("DEPRECATION")
+    fun lab(c: Context, step: Int): String {
+        val v = vibrator(c) ?: return "no vibrator found"
+        return try {
+            v.cancel()
+            val t = longArrayOf(0, 2000)
+            when (step) {
+                1 -> {
+                    v.vibrate(VibrationEffect.createWaveform(t, -1), attrs())
+                    "1: alarm channel"
+                }
+                2 -> {
+                    v.vibrate(VibrationEffect.createWaveform(t, -1))
+                    "2: no channel"
+                }
+                3 -> {
+                    v.vibrate(
+                        VibrationEffect.createWaveform(t, -1),
+                        AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build()
+                    )
+                    "3: notification channel"
+                }
+                4 -> {
+                    v.vibrate(
+                        VibrationEffect.createWaveform(t, -1),
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY).build()
+                    )
+                    "4: accessibility channel"
+                }
+                5 -> {
+                    v.vibrate(t, -1)
+                    "5: old style"
+                }
+                else -> {
+                    v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
+                    "6: heavy click"
+                }
+            }
+        } catch (e: Exception) {
+            "$step: error " + e.javaClass.simpleName
+        }
+    }
+
     fun hasAmplitudeControl(c: Context): Boolean =
         try {
             vibrator(c)?.hasAmplitudeControl() ?: false

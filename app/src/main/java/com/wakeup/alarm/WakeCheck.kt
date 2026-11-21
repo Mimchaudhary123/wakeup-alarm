@@ -8,6 +8,8 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 
 /**
  * The wake-up checks. After the alarm task is finished, a first check opens after 1 minute
@@ -132,6 +134,7 @@ object WakeCheck {
             am.cancel(pending(c, PHASE_DEADLINE))
             cancelNotification(c)
             Haptics.stop(c)
+            if (!AlarmService.isRinging) DndGuard.end(c)
             if (stage == 1 && mode != 0) {
                 val now = System.currentTimeMillis()
                 val finishAt = s.getLong(KEY_FINISH_AT, now)
@@ -216,8 +219,15 @@ object WakeCheck {
 
     /** Zigzag vibration, a backup notification and the check screen itself. */
     private fun show(c: Context) {
-        // Intense zigzag vibration, until the check is finished or the time runs out.
+        // Do Not Disturb off while the check is open, then the long vibration until it is finished.
+        val switched = DndGuard.begin(c)
         Haptics.startZigzag(c)
+        if (switched) {
+            // Vibrations started while Do Not Disturb was still on are dropped: start it once more.
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (store(c).getLong(KEY_DEADLINE_AT, 0L) > 0L) Haptics.startZigzag(c)
+            }, 900)
+        }
         val intent = Intent(c, WakeCheckActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

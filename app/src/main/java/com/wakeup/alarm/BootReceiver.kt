@@ -20,6 +20,9 @@ class BootReceiver : BroadcastReceiver() {
             }
         }
 
+        // If the app had switched Do Not Disturb off for an alarm and the phone went down, put it back.
+        if (!AlarmService.isRinging && intent.action == Intent.ACTION_BOOT_COMPLETED) DndGuard.end(context)
+
         // After reboot, app update, or time/timezone change: set everything up again.
         AlarmScheduler.scheduleAll(context)
         ReminderScheduler.scheduleNext(context)

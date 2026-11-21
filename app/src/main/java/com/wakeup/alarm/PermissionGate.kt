@@ -61,6 +61,14 @@ object PermissionGate {
             }
         ),
         PermStep(
+            "dnd", "Do Not Disturb access",
+            "Do Not Disturb can silence the alarm sound and the vibration. With this, the app switches it off only while an alarm or check is active, then puts it back.",
+            "Find For Akhirah in the list and switch it on.",
+            false,
+            { c -> DndGuard.hasAccess(c) },
+            { _ -> Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS) }
+        ),
+        PermStep(
             "battery", "Run in the background",
             "Stops the phone from putting the alarm and the reminders to sleep.",
             "Tap Allow on the box that opens.",
