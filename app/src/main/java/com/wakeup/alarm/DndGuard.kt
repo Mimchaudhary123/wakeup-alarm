@@ -12,6 +12,10 @@ import android.provider.Settings
  */
 object DndGuard {
     private const val KEY_SAVED = "dnd_saved_filter"
+    private const val KEY_SAVED_RINGER = "dnd_saved_ringer"
+
+    @Volatile
+    private var lastNoAccessLogAt = 0L
 
     private fun nm(c: Context) = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -49,33 +53,57 @@ object DndGuard {
             } catch (e: Exception) {
                 -1
             }
+            val hasVib = try {
+                (c.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator).hasVibrator()
+            } catch (e: Exception) {
+                false
+            }
             "Do Not Disturb: $filter, alarms allowed: $alarmsAllowed, app access: ${hasAccess(c)}" +
-                "\nSound mode: $ringer, alarm vibration setting: $intensity"
+                "\nSound mode: $ringer, alarm vibration setting: $intensity, vibrator found: $hasVib"
         } catch (e: Exception) {
             "Do Not Disturb: unknown"
         }
 
     /**
-     * Switches Do Not Disturb off (remembering what it was) while an alarm or check is active.
-     * Returns true if it really switched something off.
+     * While an alarm, a check or a reminder is active: switches Do Not Disturb off and leaves the
+     * SILENT sound mode (to vibrate), remembering what they were. Needs the Do Not Disturb access.
+     * Returns true if it really changed something.
      */
     fun begin(c: Context): Boolean {
         try {
             val n = nm(c)
-            val current = n.currentInterruptionFilter
-            if (current == NotificationManager.INTERRUPTION_FILTER_ALL ||
-                current == NotificationManager.INTERRUPTION_FILTER_UNKNOWN
-            ) return false
+            val am = c.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val filter = n.currentInterruptionFilter
+            val dndOn = filter != NotificationManager.INTERRUPTION_FILTER_ALL &&
+                filter != NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+            val silent = am.ringerMode == AudioManager.RINGER_MODE_SILENT
+            if (!dndOn && !silent) return false
             if (!hasAccess(c)) {
-                AppLog.add(c, "Do Not Disturb is ON and the app has no access to switch it off: sound and vibration may be silent")
+                val now = System.currentTimeMillis()
+                if (now - lastNoAccessLogAt > 6 * 60 * 60 * 1000L) {
+                    lastNoAccessLogAt = now
+                    AppLog.add(c, "Do Not Disturb or silent mode is ON and the app has no Do Not Disturb access: sound and vibration may be silent")
+                }
                 return false
             }
             val s = store(c)
-            if (!s.contains(KEY_SAVED)) s.edit().putInt(KEY_SAVED, current).apply()
-            n.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-            AppLog.add(c, "Do Not Disturb was on: switched off while the alarm is active")
-            return true
+            var changed = false
+            if (dndOn) {
+                if (!s.contains(KEY_SAVED)) s.edit().putInt(KEY_SAVED, filter).apply()
+                n.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+                changed = true
+            }
+            if (am.ringerMode == AudioManager.RINGER_MODE_SILENT) {
+                if (!s.contains(KEY_SAVED_RINGER)) {
+                    s.edit().putInt(KEY_SAVED_RINGER, AudioManager.RINGER_MODE_SILENT).apply()
+                }
+                am.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                changed = true
+            }
+            if (changed) AppLog.add(c, "Do Not Disturb / silent mode switched off while the alarm is active")
+            return changed
         } catch (e: Exception) {
+            AppLog.add(c, "could not switch Do Not Disturb off: " + e.javaClass.simpleName)
             return false
         }
     }
@@ -85,17 +113,24 @@ object DndGuard {
         if (!AlarmService.isRinging && !WakeCheckActivity.showing) end(c)
     }
 
-    /** Puts Do Not Disturb back the way it was. */
+    /** Puts Do Not Disturb and the sound mode back the way they were. */
     fun end(c: Context) {
         try {
             val s = store(c)
-            if (!s.contains(KEY_SAVED)) return
-            val saved = s.getInt(KEY_SAVED, NotificationManager.INTERRUPTION_FILTER_ALL)
-            s.edit().remove(KEY_SAVED).apply()
-            if (hasAccess(c) && saved != NotificationManager.INTERRUPTION_FILTER_ALL) {
-                nm(c).setInterruptionFilter(saved)
-                AppLog.add(c, "Do Not Disturb put back")
+            val hadFilter = s.contains(KEY_SAVED)
+            val hadRinger = s.contains(KEY_SAVED_RINGER)
+            if (!hadFilter && !hadRinger) return
+            val savedFilter = s.getInt(KEY_SAVED, NotificationManager.INTERRUPTION_FILTER_ALL)
+            val savedRinger = s.getInt(KEY_SAVED_RINGER, AudioManager.RINGER_MODE_NORMAL)
+            s.edit().remove(KEY_SAVED).remove(KEY_SAVED_RINGER).apply()
+            if (!hasAccess(c)) return
+            if (hadFilter && savedFilter != NotificationManager.INTERRUPTION_FILTER_ALL) {
+                nm(c).setInterruptionFilter(savedFilter)
             }
+            if (hadRinger) {
+                (c.getSystemService(Context.AUDIO_SERVICE) as AudioManager).ringerMode = savedRinger
+            }
+            AppLog.add(c, "Do Not Disturb / sound mode put back")
         } catch (e: Exception) {
         }
     }

@@ -30,6 +30,7 @@ object AlarmScheduler {
     private const val PREFS = "wakeup_prefs"
     private const val KEY_ALARMS = "alarms_json"
     private const val KEY_NEXT_ID = "alarms_next_id"
+    private const val KEY_CHECK_ON_V8 = "check_on_for_all_v8"
 
     // Old single-alarm keys (only used once, to carry an existing alarm over).
     private const val OLD_HOUR = "hour"
@@ -56,7 +57,16 @@ object AlarmScheduler {
             migrateOldAlarm(c)
             return parse(prefs(c).getString(KEY_ALARMS, "[]") ?: "[]")
         }
-        return parse(raw)
+        val list = parse(raw)
+        // One time only: alarms saved by older versions have the wake-up check OFF. Turn it ON for
+        // all of them (it can still be switched off per alarm afterwards).
+        if (!p.getBoolean(KEY_CHECK_ON_V8, false)) {
+            p.edit().putBoolean(KEY_CHECK_ON_V8, true).apply()
+            val fixed = list.map { it.copy(check = true) }
+            saveAll(c, fixed)
+            return fixed
+        }
+        return list
     }
 
     private fun parse(raw: String): List<AlarmItem> {

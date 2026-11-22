@@ -1140,6 +1140,14 @@ class MainActivity : Activity() {
                 )
             }
         )
+        rows.add(
+            PermRow(
+                "Do Not Disturb access", "Lets the alarm ring and vibrate in Do Not Disturb and silent mode",
+                DndGuard.hasAccess(this), true
+            ) {
+                openSettings(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+            }
+        )
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         rows.add(
             PermRow(
