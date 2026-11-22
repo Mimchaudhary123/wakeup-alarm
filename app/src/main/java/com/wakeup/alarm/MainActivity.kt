@@ -2,6 +2,7 @@ package com.wakeup.alarm
 
 import android.Manifest
 import android.app.Activity
+import android.app.AppOpsManager
 import android.app.DatePickerDialog
 import android.app.Dialog
 import android.app.TimePickerDialog
@@ -260,14 +261,8 @@ class MainActivity : Activity() {
                 DndGuard.endIfIdle(this)
             }, 6000)
         })
-        body.addView(styledButton("Vibration lab (6 different ways)", Color.TRANSPARENT, paleGold, paleGold) {
-            Toast.makeText(
-                this,
-                "Hold the phone. 6 buzzes of 2 seconds each. Remember the numbers you feel.",
-                Toast.LENGTH_LONG
-            ).show()
-            DndGuard.begin(this)
-            Handler(Looper.getMainLooper()).postDelayed({ runVibrationLab(1) }, 2500)
+        body.addView(styledButton("Vibration report and lab", Color.TRANSPARENT, paleGold, paleGold) {
+            showVibrationReport()
         })
         body.addView(styledButton("Test the wake-up check", Color.TRANSPARENT, paleGold, paleGold) {
             AlarmScheduler.scheduleTestWithCheck(this, 10_000)
@@ -983,16 +978,132 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun runVibrationLab(step: Int) {
+    /** The facts about vibration on this phone, as text (for the report window). */
+    private fun vibrationFacts(): String {
+        val sb = StringBuilder()
+        try {
+            @Suppress("DEPRECATION")
+            val v = getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            sb.append("Vibrator found: ").append(if (v.hasVibrator()) "yes" else "NO").append("\n")
+            sb.append("Strength control: ").append(if (v.hasAmplitudeControl()) "yes" else "no").append("\n")
+        } catch (e: Exception) {
+            sb.append("Vibrator: error\n")
+        }
+        sb.append(DndGuard.describe(this)).append("\n")
+        val mode = try {
+            (getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager)
+                .unsafeCheckOpNoThrow("android:vibrate", android.os.Process.myUid(), packageName)
+        } catch (e: Throwable) {
+            -99
+        }
+        sb.append("Android's permission for this app to vibrate: ").append(
+            when (mode) {
+                AppOpsManager.MODE_ALLOWED -> "allowed"
+                AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED -> "BLOCKED"
+                AppOpsManager.MODE_DEFAULT -> "default"
+                else -> "unknown"
+            }
+        ).append("\n")
+        val saver = try {
+            (getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode
+        } catch (e: Exception) {
+            false
+        }
+        sb.append("Battery saver: ").append(if (saver) "ON" else "off").append("\n")
+        val haptic = try {
+            Settings.System.getInt(contentResolver, "haptic_feedback_enabled", -1)
+        } catch (e: Exception) {
+            -1
+        }
+        sb.append("Touch vibration setting: ").append(haptic)
+        return sb.toString()
+    }
+
+    private fun showVibrationReport() {
+        val dlg = Dialog(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(14))
+        }
+        content.addView(TextView(this).apply {
+            text = "Vibration report"
+            textSize = 20f
+            setTextColor(brown)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(8))
+        })
+        val facts = TextView(this).apply {
+            text = vibrationFacts()
+            textSize = 13f
+            setTextColor(brown)
+        }
+        content.addView(facts)
+        val status = TextView(this).apply {
+            text = "Hold the phone, then tap Start. It buzzes 7 different ways, 2 seconds each."
+            textSize = 15f
+            setTextColor(brown)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(12), 0, dp(8))
+        }
+        content.addView(status)
+        val answers = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            visibility = View.GONE
+        }
+        val felt = styledButton("I felt something", brown, paleGold, Color.TRANSPARENT) {}
+        val nothing = styledButton("I felt nothing", Color.TRANSPARENT, brown, brown) {}
+        for (b in listOf(felt, nothing)) {
+            b.layoutParams = LinearLayout.LayoutParams(0, wrapContent, 1f).apply {
+                setMargins(dp(4), dp(4), dp(4), dp(4))
+            }
+            answers.addView(b)
+        }
+        felt.setOnClickListener {
+            AppLog.add(this, "vibration lab: something was felt")
+            status.text = "Good. Tell me which numbers you felt."
+            answers.visibility = View.GONE
+        }
+        nothing.setOnClickListener {
+            AppLog.add(this, "vibration lab: nothing was felt (see the report)")
+            status.text = "Thanks. Take a screenshot of this window and of Diagnostics, and send both."
+            facts.text = vibrationFacts()
+            answers.visibility = View.GONE
+        }
+        val start = styledButton("Start", brown, paleGold, Color.TRANSPARENT) {}
+        start.setOnClickListener {
+            start.isEnabled = false
+            answers.visibility = View.GONE
+            val switched = DndGuard.begin(this)
+            facts.text = vibrationFacts()
+            Handler(Looper.getMainLooper()).postDelayed(
+                { runVibrationLab(1, status, answers, start) },
+                if (switched) 1500L else 800L
+            )
+        }
+        content.addView(start)
+        content.addView(answers)
+        content.addView(styledButton("Open Do Not Disturb access", Color.TRANSPARENT, brown, brown) {
+            openSettings(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+        })
+        content.addView(styledButton("Close", Color.TRANSPARENT, brown, brown) { dlg.dismiss() })
+        showSheet(dlg, content)
+    }
+
+    private fun runVibrationLab(step: Int, status: TextView, answers: View, start: Button) {
         if (step > Haptics.LAB_STEPS) {
             Haptics.stop(this)
+            Haptics.labCleanup(this)
             DndGuard.endIfIdle(this)
-            Toast.makeText(this, "Done. Tell me which numbers you felt.", Toast.LENGTH_LONG).show()
+            status.text = "Finished. Did you feel anything at all?"
+            answers.visibility = View.VISIBLE
+            start.isEnabled = true
             return
         }
         val name = Haptics.lab(this, step)
-        Toast.makeText(this, "Now: $name", Toast.LENGTH_SHORT).show()
-        Handler(Looper.getMainLooper()).postDelayed({ runVibrationLab(step + 1) }, 3500)
+        status.text = "Buzzing now: $name"
+        Handler(Looper.getMainLooper()).postDelayed(
+            { runVibrationLab(step + 1, status, answers, start) }, 3500
+        )
     }
 
     private fun styleSwitch(sw: Switch) {

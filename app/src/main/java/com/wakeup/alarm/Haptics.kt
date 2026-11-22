@@ -1,5 +1,8 @@
 package com.wakeup.alarm
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.media.AudioAttributes
 import android.os.VibrationEffect
@@ -44,7 +47,9 @@ object Haptics {
         }
     }
 
-    const val LAB_STEPS = 6
+    const val LAB_STEPS = 7
+    private const val LAB_NOTIF_ID = 2999
+    private const val LAB_CHANNEL = "akhirah_vibration_test"
 
     /** Vibration lab: the same 2 second buzz sent in different ways. Returns a name for the way. */
     @Suppress("DEPRECATION")
@@ -81,13 +86,38 @@ object Haptics {
                     v.vibrate(t, -1)
                     "5: old style"
                 }
-                else -> {
+                6 -> {
                     v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
                     "6: heavy click"
+                }
+                else -> {
+                    // A different path: the SYSTEM vibrates for a notification, not this app.
+                    val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    val ch = NotificationChannel(LAB_CHANNEL, "Vibration test", NotificationManager.IMPORTANCE_HIGH)
+                    ch.enableVibration(true)
+                    ch.vibrationPattern = longArrayOf(0, 1500, 300, 1500)
+                    ch.setSound(null, null)
+                    nm.createNotificationChannel(ch)
+                    val n = Notification.Builder(c, LAB_CHANNEL)
+                        .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                        .setContentTitle("Vibration test")
+                        .setContentText("This notification vibrates")
+                        .setAutoCancel(true)
+                        .build()
+                    nm.notify(LAB_NOTIF_ID, n)
+                    "7: vibrating notification"
                 }
             }
         } catch (e: Exception) {
             "$step: error " + e.javaClass.simpleName
+        }
+    }
+
+    /** Removes the test notification again. */
+    fun labCleanup(c: Context) {
+        try {
+            (c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(LAB_NOTIF_ID)
+        } catch (e: Exception) {
         }
     }
 
